@@ -1,0 +1,27 @@
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# --- Machine-specific runtime artifacts -----------------------------------
+# Raw EEPROM dumps produced by this tool. They describe YOUR printer's
+# current state, not the tool. Keep them local; never commit them.
+epson_backup_bank0_*.json
+*.backup.json
+
+# --- Internal working notes (not part of the published tool) --------------
+GOREV_CLAUDE_CODE_*.md
+PORTFOLYO_KATKI_NOTU.md
+
+# --- Local scratch (Cowork cannot delete files; it moves them here) -------
+_to_delete/
+
+# --- Editors / OS ---------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store
