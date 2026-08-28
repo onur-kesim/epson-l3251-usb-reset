@@ -66,7 +66,8 @@ it, and a Python one can. That is the whole reason this repository exists.
 | Full bank-0 EEPROM backup (0x00–0xFF, 256 cells) written to a timestamped JSON | yes | *(none)* |
 | Write to EEPROM | **no** | `--reset` |
 | Skip the backup | **no** | `--no-backup` |
-| Write the six counter cells back from a backup file (**takes no backup of its own**) | **no** | `--restore <file.json>` |
+| Write the six counter cells back from a backup file (a safety backup is taken first) | **no** | `--restore <file.json>` |
+| Print the serial number in full (only the last 4 characters are shown by default) | **no** | `--show-serial` |
 
 Running the script with no arguments **cannot write anything**. The reset path
 writes zeros only to the six waste-counter cells (`0x30 0x31 0x32 0x33 0xFC 0xFD`)
@@ -88,6 +89,12 @@ py epson_l3251_usb_reset.py --reset
 # Restore counter cells from a previous backup
 py epson_l3251_usb_reset.py --restore epson_backup_bank0_<timestamp>.json
 
+# Show the full serial number (only the last 4 characters are shown by default)
+py epson_l3251_usb_reset.py --show-serial
+
+# Print the version
+py epson_l3251_usb_reset.py --version
+
 # Diagnostics only — single read, full protocol trace
 py epson_usb_probe.py
 ```
@@ -105,16 +112,19 @@ default for the same value.
 
 ## Backups
 
-A read or a reset run writes `epson_backup_bank0_<timestamp>.json` into the
-**current working directory** — not necessarily next to the script — containing
-all 256 cells of bank 0 as `address -> value`. These files describe your specific
-printer's state, so they are git-ignored by default. Keep them: `--restore` needs
-one.
+A read, a reset or a restore run writes `epson_backup_bank0_<timestamp>.json`
+**next to the script** — not into the directory you happen to call it from — and
+prints the absolute path it used. The file holds all 256 cells of bank 0 as
+`address -> value`. These files describe your specific printer's state, so they
+are git-ignored by default. Keep them: `--restore` needs one.
 
-Two things to know before you rely on this:
+Three things to know before you rely on this:
 
-* **`--restore` does not take a backup first.** It writes straight from the file
-  you give it. Take a plain read run first if the current values still matter.
+* **`--restore` takes its own safety backup first**, unless you pass
+  `--no-backup`. Restoring from a stale file no longer costs you the current
+  values without warning.
+* **A bare filename passed to `--restore`** is looked up in the current
+  directory first, then next to the script.
 * **`--restore` writes back the six waste-counter cells only**, not all 256.
 
 The tool never writes outside bank 0 (`0x00`–`0xFF`), and within it only to the

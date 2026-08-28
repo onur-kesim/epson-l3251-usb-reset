@@ -23,6 +23,8 @@ import struct
 import sys
 import time
 
+__version__ = "0.1.0"
+
 # ---- L3250-series EEPROM READ command --------------------------------------- #
 RKEY = [0x4A, 0x36]
 TEST_ADDR = 0x0030
@@ -365,12 +367,13 @@ def main():
         print('Windows only.')
         sys.exit(1)
     print("=" * 68)
-    print('  EPSON L3251  USB EEPROM READ PROBE  (READ-ONLY)')
+    print('  EPSON L3251  USB EEPROM READ PROBE  (READ-ONLY)  v%s' % __version__)
     print("=" * 68)
     ap = argparse.ArgumentParser(description='Epson L3251 USB EEPROM read probe (READ-ONLY)')
     ap.add_argument("--instance-id", metavar="IID",
                      default=os.environ.get("EPSON_INSTANCE_ID"),
                      help='Device instance id (example: USB\\VID_04B8&PID_118A&MI_00\\<INSTANCE>). If omitted, only automatic discovery is used.')
+    ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
     args = ap.parse_args()
     paths = candidate_paths(args.instance_id)
     if not paths:

@@ -11,14 +11,16 @@ EXTERNAL DEPENDENCIES (Python's built-in ctypes only).
 SAFETY
   * The default mode READS ONLY and takes a full backup. It writes nothing.
   * Resetting requires an explicit  --reset  ; a bank-0 backup is taken first.
-  * --restore <file> writes the six counter cells back from a backup.
-  * --restore does NOT take a backup of its own before writing.
+  * --restore <file> writes the six counter cells back from a backup; a bank-0
+    safety backup is taken first too, unless  --no-backup  is given.
 
 USAGE
   Read state + take a backup (no writes):  py epson_l3251_usb_reset.py
   RESET (writes!):                         py epson_l3251_usb_reset.py --reset
   Restore from a backup:                   py epson_l3251_usb_reset.py --restore <file.json>
   With an explicit device id:               py epson_l3251_usb_reset.py --instance-id "USB\\VID_04B8&..."
+  Show the full serial number:              py epson_l3251_usb_reset.py --show-serial
+  Print the version:                        py epson_l3251_usb_reset.py --version
 """
 
 import argparse
@@ -30,6 +32,9 @@ import re
 import struct
 import sys
 import time
+
+__version__ = "0.1.0"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --------------------------------------------------------------------------- #
 #  L3250-series EEPROM command parameters                                      #
@@ -397,6 +402,15 @@ def read_serial(sess):
         return '(unreadable)'
 
 
+def mask_serial(serial):
+    """Show only the last 4 characters; empty/unreadable values pass through unchanged."""
+    if not serial or serial == '(unreadable)':
+        return serial
+    if len(serial) <= 4:
+        return '*' * len(serial)
+    return '*' * (len(serial) - 4) + serial[-4:]
+
+
 def backup_bank0(sess):
     print('\n  Taking a full bank-0 EEPROM backup (0x00-0xFF)...')
     cells = {}
@@ -408,6 +422,17 @@ def backup_bank0(sess):
     ok = sum(1 for v in cells.values() if v is not None)
     print('    %d/256 cells read.' % ok)
     return cells
+
+
+def save_backup_file(cells):
+    """Write a bank-0 backup next to the script (not the caller's CWD) and print its absolute path."""
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    bkp = "epson_backup_bank0_%s.json" % ts
+    bkp_path = os.path.join(SCRIPT_DIR, bkp)
+    with open(bkp_path, "w", encoding="utf-8") as f:
+        json.dump({"time": ts, "bank0": cells}, f, indent=2)
+    print('  Backup saved: %s' % bkp_path)
+    return bkp_path
 
 
 def do_reset(sess):
@@ -422,7 +447,19 @@ def do_reset(sess):
     return all_ok
 
 
+def resolve_input_path(path):
+    """A bare filename (no directory component) is looked up in the CWD first, then next to the script."""
+    if os.path.isfile(path):
+        return path
+    if not os.path.dirname(path):
+        candidate = os.path.join(SCRIPT_DIR, path)
+        if os.path.isfile(candidate):
+            return candidate
+    return path
+
+
 def do_restore(sess, path):
+    path = resolve_input_path(path)
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     cells = data.get("bank0", {})
@@ -462,15 +499,17 @@ def main():
         sys.exit(1)
     ap = argparse.ArgumentParser(description='Epson L3251 waste ink pad counter reset over USB (D4)')
     ap.add_argument("--reset", action="store_true", help='RESET the counters (writes to the printer!)')
-    ap.add_argument("--restore", metavar='FILE', help='Write the six counter cells back from a backup JSON (takes no backup of its own)')
+    ap.add_argument("--restore", metavar='FILE', help='Write the six counter cells back from a backup JSON')
     ap.add_argument("--no-backup", action="store_true", help='Do NOT take a backup before writing')
     ap.add_argument("--instance-id", metavar="IID",
                      default=os.environ.get("EPSON_INSTANCE_ID"),
                      help='Device instance id (example: USB\\VID_04B8&PID_118A&MI_00\\<INSTANCE>). If omitted, only automatic discovery is used.')
+    ap.add_argument("--show-serial", action="store_true", help='Print the full serial number instead of the masked form')
+    ap.add_argument("--version", action="version", version="%(prog)s " + __version__)
     args = ap.parse_args()
 
     print("=" * 70)
-    print('  EPSON L3251  Waste Ink Pad  USB/D4 counter reset')
+    print('  EPSON L3251  Waste Ink Pad  USB/D4 counter reset  v%s' % __version__)
     print("=" * 70)
 
     try:
@@ -481,11 +520,17 @@ def main():
         sys.exit(2)
 
     print('  Connected (USB/D4, revision 0x%02X).' % sess.rev)
-    print('  Serial:', read_serial(sess))
+    serial = read_serial(sess)
+    print('  Serial:', serial if args.show_serial else mask_serial(serial))
 
     try:
         if args.restore:
             read_waste(sess)
+            if args.no_backup:
+                print('\n  --no-backup given: skipping the safety backup before restore.')
+            else:
+                cells = backup_bank0(sess)
+                save_backup_file(cells)
             do_restore(sess, args.restore)
             print('\n  After restore:')
             read_waste(sess)
@@ -497,22 +542,14 @@ def main():
             print('\n  (READ-ONLY mode - nothing was written.)')
             if not args.no_backup:
                 cells = backup_bank0(sess)
-                ts = time.strftime("%Y%m%d_%H%M%S")
-                bkp = "epson_backup_bank0_%s.json" % ts
-                with open(bkp, "w", encoding="utf-8") as f:
-                    json.dump({"time": ts, "bank0": cells}, f, indent=2)
-                print('  Backup saved: %s' % bkp)
+                save_backup_file(cells)
             print('\n  Add  --reset  to the command to reset the counters.')
             return
 
         # --- reset path ---
         if not args.no_backup:
             cells = backup_bank0(sess)
-            ts = time.strftime("%Y%m%d_%H%M%S")
-            bkp = "epson_backup_bank0_%s.json" % ts
-            with open(bkp, "w", encoding="utf-8") as f:
-                json.dump({"time": ts, "bank0": cells}, f, indent=2)
-            print('  Backup saved: %s' % bkp)
+            save_backup_file(cells)
 
         ok = do_reset(sess)
         print('\n  State after the reset:')
