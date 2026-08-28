@@ -12,7 +12,7 @@ to the Windows printer channel.
 
 ## Why this exists
 
-The L3250 generation is a documented gap in the existing open-source tooling:
+The L3250 generation is a documented gap in the **Python** tooling:
 
 * [`epson_print_conf`](https://github.com/Ircama/epson_print_conf) lists **L3250**
   under **"Known incompatible models"**, and describes its transport as:
