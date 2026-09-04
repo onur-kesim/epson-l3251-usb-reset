@@ -11,12 +11,14 @@ EXTERNAL DEPENDENCIES (Python's built-in ctypes only).
 SAFETY
   * The default mode READS ONLY and takes a full backup. It writes nothing.
   * Resetting requires an explicit  --reset  ; a bank-0 backup is taken first.
-  * --restore <file> writes the six counter cells back from a backup; a bank-0
+  * --restore <file> writes every waste-related cell back from a backup; a bank-0
     safety backup is taken first too, unless  --no-backup  is given.
 
 USAGE
   Read state + take a backup (no writes):  py epson_l3251_usb_reset.py
-  RESET (writes!):                         py epson_l3251_usb_reset.py --reset
+  RESET the 6 known cells (writes!):       py epson_l3251_usb_reset.py --reset
+  RESET the full spec cell set (writes!):  py epson_l3251_usb_reset.py --reset-full
+  Firmware "rw" service reset (writes!):   py epson_l3251_usb_reset.py --service-reset
   Restore from a backup:                   py epson_l3251_usb_reset.py --restore <file.json>
   With an explicit device id:               py epson_l3251_usb_reset.py --instance-id "USB\\VID_04B8&..."
   Show the full serial number:              py epson_l3251_usb_reset.py --show-serial
@@ -26,6 +28,7 @@ USAGE
 import argparse
 import ctypes
 import ctypes.wintypes as wt
+import hashlib
 import json
 import os
 import re
@@ -33,7 +36,7 @@ import struct
 import sys
 import time
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --------------------------------------------------------------------------- #
@@ -43,12 +46,46 @@ RKEY = [0x4A, 0x36]                                   # read/write model code (7
 WKEY = bytes([78, 98, 115, 106, 99, 98, 122, 98])    # "Nbsjcbzb"
 
 # Waste ink counter groups: (addresses, divisor, label)
+#
+# !! THE DIVISORS ARE UNVERIFIED. They come from a public gist and have never
+# been checked against this printer. Measured 2026-09-04: with the main pad at
+# raw=15128 this arithmetic claimed ">100%, FULL" while the printer reported NO
+# error at all. So the divisors do not match the firmware's real thresholds.
+# The RAW values are real; the percentages are not. Nothing is printed as a
+# percentage unless --unverified-percent is passed explicitly.
 WASTE_COUNTERS = [
     ([0x30, 0x31], 6345, 'Main waste pad'),
     ([0x32, 0x33], 3416, 'Secondary pad'),
     ([0xFC, 0xFD], 1300, 'Borderless/platen pad'),
 ]
 WASTE_ADDRS = [0x30, 0x31, 0x32, 0x33, 0xFC, 0xFD]
+
+# Full reset set for this model group, taken verbatim from the reinkpy spec
+# (reinkpy/epson.toml, the rkey=0x364A / wkey="Nbsjcbzb" group, whose model list
+# contains L3251). Note that three cells reset to 0x5E, NOT to zero:
+#   { addr = [0x1C,0x34,0x35,0x36,0x37,0xFF], reset = [0,0,0,0x5E,0x5E,0x5E] }
+#   { addr = [0x2F] }  { addr = [0x30,0x31] }  { addr = [0x32,0x33] }
+#   { addr = [0xFC,0xFD] }  { addr = [0xFE] }          (no reset= -> zeros)
+FULL_RESET_CELLS = [
+    (0x1C, 0x00), (0x34, 0x00), (0x35, 0x00),
+    (0x36, 0x5E), (0x37, 0x5E), (0xFF, 0x5E),
+    (0x2F, 0x00),
+    (0x30, 0x00), (0x31, 0x00),
+    (0x32, 0x00), (0x33, 0x00),
+    (0xFC, 0x00), (0xFD, 0x00),
+    (0xFE, 0x00),
+]
+
+# Single cells the same spec calls waste-related but that --reset never touched.
+# (address, value the spec resets it to) - shown for context on every read.
+EXTRA_WATCH = [
+    (0x1C, 0x00), (0x2F, 0x00), (0x34, 0x00), (0x35, 0x00),
+    (0x36, 0x5E), (0x37, 0x5E), (0xFE, 0x00), (0xFF, 0x5E),
+]
+
+# Every cell any write path can touch. --restore must cover all of them,
+# otherwise --reset-full would not be fully undoable from a backup.
+RESTORE_ADDRS = sorted(set(WASTE_ADDRS) | set(a for a, _ in FULL_RESET_CELLS))
 
 
 def build_read_cmd(addr):
@@ -61,6 +98,22 @@ def build_write_cmd(addr, val):
     lo, hi = addr & 0xFF, (addr >> 8) & 0xFF
     payload = bytes([RKEY[0], RKEY[1], 0x42, 0xBD, 0x21, lo, hi, val & 0xFF]) + WKEY
     return b"\x7c\x7c" + struct.pack("<H", len(payload)) + payload
+
+
+def build_service_rw_cmd(serial):
+    r"""Epson "rw" (reset waste) SERVICE command.
+
+    Frame taken from reinkpy (reinkpy/epson.py, Device.do_rw + Device.encode):
+        ctrl(('rw', b'\x00' + hashlib.sha1(serial.encode('ascii')).digest()))
+    'rw' is a plain two-letter command, NOT a factory ('|','A'/'B') command, so
+    it carries no rkey/opcode prefix - just the name, a little-endian uint16
+    length and the payload. Payload is 1 + 20 = 21 bytes.
+
+    reinkpy hashes info['serial_number'], i.e. the USB iSerialNumber STRING
+    DESCRIPTOR - not the serial stored in EEPROM. See usb_serial_candidates().
+    """
+    payload = b"\x00" + hashlib.sha1(serial.encode("ascii")).digest()
+    return b"rw" + struct.pack("<H", len(payload)) + payload
 
 
 # --------------------------------------------------------------------------- #
@@ -158,6 +211,108 @@ def find_usbprint_paths():
     finally:
         setupapi.SetupDiDestroyDeviceInfoList(hdev)
     return paths
+
+
+# --------------------------------------------------------------------------- #
+#  USB device-descriptor serial number (cfgmgr32)                              #
+# --------------------------------------------------------------------------- #
+# reinkpy's do_rw hashes info['serial_number'], which for a USB device is the
+# iSerialNumber STRING DESCRIPTOR - NOT the serial stored in EEPROM. On Windows
+# the same string is the last segment of the parent USB device's instance id
+# (USB\VID_04B8&PID_XXXX\<serial>). Bus-generated ids contain '&' and are not
+# serials, so they are skipped.
+cfgmgr32 = ctypes.WinDLL("cfgmgr32", use_last_error=True)
+CR_SUCCESS = 0
+
+
+class SP_DEVINFO_DATA(ctypes.Structure):
+    _fields_ = [("cbSize", wt.DWORD), ("ClassGuid", GUID),
+                ("DevInst", wt.DWORD), ("Reserved", ctypes.POINTER(ctypes.c_ulong))]
+
+
+# Re-declare with a typed last parameter; None is still a valid argument, so the
+# existing find_usbprint_paths() calls keep working unchanged.
+setupapi.SetupDiGetDeviceInterfaceDetailW.argtypes = [
+    wt.HANDLE, ctypes.c_void_p, ctypes.c_void_p, wt.DWORD, LPDWORD,
+    ctypes.POINTER(SP_DEVINFO_DATA)]
+cfgmgr32.CM_Get_Parent.argtypes = [ctypes.POINTER(wt.DWORD), wt.DWORD, ctypes.c_ulong]
+cfgmgr32.CM_Get_Parent.restype = ctypes.c_ulong
+cfgmgr32.CM_Get_Device_IDW.argtypes = [wt.DWORD, wt.LPWSTR, ctypes.c_ulong, ctypes.c_ulong]
+cfgmgr32.CM_Get_Device_IDW.restype = ctypes.c_ulong
+
+
+def _looks_like_serial(seg):
+    seg = (seg or "").strip()
+    if not seg or "&" in seg or not (4 <= len(seg) <= 32):
+        return False
+    return all(c.isalnum() or c in "-_" for c in seg)
+
+
+def _device_id(devinst):
+    buf = ctypes.create_unicode_buffer(512)
+    if cfgmgr32.CM_Get_Device_IDW(devinst, buf, 512, 0) != CR_SUCCESS:
+        return None
+    return buf.value
+
+
+def usb_serial_candidates():
+    """Serial strings the Windows USB stack reports for the Epson device."""
+    out = []
+
+    def add(v):
+        if v and v not in out:
+            out.append(v)
+
+    hdev = setupapi.SetupDiGetClassDevsW(ctypes.byref(USBPRINT_GUID), None, None,
+                                         DIGCF_PRESENT | DIGCF_DEVICEINTERFACE)
+    if not hdev or hdev == INVALID_HANDLE_VALUE:
+        return out
+    try:
+        idx = 0
+        while True:
+            ifdata = SP_DEVICE_INTERFACE_DATA()
+            ifdata.cbSize = ctypes.sizeof(SP_DEVICE_INTERFACE_DATA)
+            if not setupapi.SetupDiEnumDeviceInterfaces(hdev, None, ctypes.byref(USBPRINT_GUID),
+                                                        idx, ctypes.byref(ifdata)):
+                break
+            idx += 1
+            req = wt.DWORD(0)
+            setupapi.SetupDiGetDeviceInterfaceDetailW(hdev, ctypes.byref(ifdata), None, 0,
+                                                      ctypes.byref(req), None)
+            if req.value == 0:
+                continue
+            buf = ctypes.create_string_buffer(req.value)
+            cbsize = 8 if ctypes.sizeof(ctypes.c_void_p) == 8 else 6
+            ctypes.memmove(buf, struct.pack("I", cbsize), 4)
+            info = SP_DEVINFO_DATA()
+            info.cbSize = ctypes.sizeof(SP_DEVINFO_DATA)
+            if not setupapi.SetupDiGetDeviceInterfaceDetailW(hdev, ctypes.byref(ifdata), buf,
+                                                             req.value, None, ctypes.byref(info)):
+                continue
+            path = ctypes.wstring_at(ctypes.addressof(buf) + 4)
+            if "VID_04B8" not in path.upper():
+                continue
+            parts = path.split("#")
+            if len(parts) > 2 and _looks_like_serial(parts[2]):
+                add(parts[2])
+            dev = info.DevInst
+            for _ in range(3):                       # walk up: interface -> device
+                parent = wt.DWORD(0)
+                if cfgmgr32.CM_Get_Parent(ctypes.byref(parent), dev, 0) != CR_SUCCESS:
+                    break
+                dev = parent.value
+                did = _device_id(dev) or ""
+                if not did.upper().startswith("USB\\"):
+                    break
+                seg = did.split("\\")[-1]
+                if _looks_like_serial(seg):
+                    add(seg)
+                    break
+    except Exception as e:
+        print('  (USB serial lookup failed: %s)' % e)
+    finally:
+        setupapi.SetupDiDestroyDeviceInfoList(hdev)
+    return out
 
 
 def candidate_paths(instance_id=None):
@@ -366,12 +521,18 @@ class D4Session:
         resp = self.cmd(build_write_cmd(addr, val))
         return bool(resp) and (b":OK;" in resp)
 
+    def service_rw(self, serial):
+        'Run the Epson "rw" (reset waste) service command. Returns the raw reply.'
+        return self.cmd(build_service_rw_cmd(serial), tries=20)
+
 
 # --------------------------------------------------------------------------- #
 #  High-level operations                                                       #
 # --------------------------------------------------------------------------- #
-def read_waste(sess):
-    print('\n  Waste ink counters:')
+def read_waste(sess, show_pct=False):
+    """Print the RAW counter values. No percentage and no FULL label: the
+    divisors are unverified and were measured to disagree with the firmware."""
+    print('\n  Waste ink counters (RAW - divisors unverified, see the note above):')
     out = []
     for addrs, div, label in WASTE_COUNTERS:
         vals = []
@@ -383,10 +544,29 @@ def read_waste(sess):
             out.append((label, None, None))
             continue
         raw = int("".join("%02X" % v for v in vals), 16)
-        pct = (raw / div) * 100.0
-        flag = '   <-- FULL' if pct >= 100 else ""
-        print('    - %-26s: %%%6.2f  (raw=%d)%s' % (label, pct, raw, flag))
-        out.append((label, raw, pct))
+        line = '    - %-26s: raw=%-6d (0x%04X)' % (label, raw, raw)
+        if show_pct:
+            line += '   [UNVERIFIED: %.2f%% of %d]' % ((raw / div) * 100.0, div)
+        print(line)
+        out.append((label, raw, (raw / div) * 100.0))
+    return out
+
+
+def read_extras(sess):
+    """Show the spec's other waste-related cells and whether they sit at the
+    value the spec resets them to. --reset never touched any of these."""
+    print('\n  Other waste-related cells from the same spec (not written by --reset):')
+    out = {}
+    for a, target in EXTRA_WATCH:
+        v = sess.read_eeprom(a)
+        out[a] = v
+        if v is None:
+            note = '   READ FAILED'
+        elif v == target:
+            note = '   (at the spec reset value)'
+        else:
+            note = '   <-- NOT at the spec reset value (%d)' % target
+        print('    - 0x%02X: %s%s' % (a, ('%3d' % v) if v is not None else '  ?', note))
     return out
 
 
@@ -447,6 +627,125 @@ def do_reset(sess):
     return all_ok
 
 
+def do_full_reset(sess):
+    """Write the FULL cell set from the reinkpy spec for this model group.
+
+    --reset only ever wrote six cells. The spec lists fourteen, and three of
+    them reset to 0x5E rather than to zero. Cells the partial reset never
+    touched are a candidate explanation for the main pad counter reappearing
+    after a power cycle.
+    """
+    print('\n  >>> FULL RESET: writing the reinkpy spec values to %d cells...'
+          % len(FULL_RESET_CELLS))
+    all_ok = True
+    for a, v in FULL_RESET_CELLS:
+        before = sess.read_eeprom(a)
+        ok = sess.write_eeprom(a, v)
+        after = sess.read_eeprom(a)
+        good = bool(ok) and after == v
+        print('    - 0x%04X  %s -> %-3d   [%s]'
+              % (a, ('%3d' % before) if before is not None else '  ?', v,
+                 "OK" if good else 'FAILED (read back=%r)' % after))
+        all_ok &= good
+    return all_ok
+
+
+def hex_decode_serial(v):
+    """Decode an ASCII-hex serial blob back to text, dropping NUL padding.
+
+    Returns None when the string is not plain hex.
+    """
+    try:
+        if not v or len(v) % 2 or not all(c in "0123456789abcdefABCDEF" for c in v):
+            return None
+        t = bytes.fromhex(v).replace(b"\x00", b"").decode("ascii")
+        return t if (t and t.isprintable()) else None
+    except Exception:
+        return None
+
+
+def serial_candidates(sess, override=None, show=False):
+    """Ordered list of strings to try as the "rw" hash input.
+
+    reinkpy hashes info['serial_number'], i.e. the USB iSerialNumber STRING
+    DESCRIPTOR. MEASURED on this printer (2026-09-04): the two sources do NOT
+    agree -
+    Shapes only, illustrated with a made-up serial - never the real one:
+        EEPROM 0x0644-0x064D : ABCD012345            (plain text, 10 chars)
+        USB parent instance  : 414243443031323300    (ASCII-hex of "ABCD0123"
+                                                      plus a trailing 00 byte)
+    Windows does not preserve the descriptor's letter case (symbolic links come
+    back lower case, SetupAPI ids upper case), so both cases are tried. Which
+    string the firmware actually hashes is UNVERIFIED, hence a candidate list
+    rather than a single guess. --serial forces one string and skips the rest.
+    """
+    def fmt(v):
+        return (v if show else mask_serial(v)) or '(none)'
+
+    eeprom = read_serial(sess)
+    usb = usb_serial_candidates()
+    print('\n  Serial sources:')
+    print('    - EEPROM (0x0644-0x064D) : %s' % fmt(eeprom))
+    print('    - USB descriptor         : %s'
+          % (', '.join(fmt(u) for u in usb) if usb else '(none found)'))
+    if override:
+        print('    -> using --serial from the command line (nothing else is tried)')
+        return [override]
+
+    cands = []
+
+    def add(v, why):
+        if v and all(v != c[0] for c in cands):
+            cands.append((v, why))
+
+    for u in usb:
+        add(u.upper(), 'USB descriptor, upper case')
+        add(u.lower(), 'USB descriptor, lower case')
+    if eeprom and eeprom != '(unreadable)':
+        add(eeprom, 'EEPROM text serial')
+    for u in usb:
+        add(hex_decode_serial(u), 'USB descriptor, hex-decoded')
+    if not cands:
+        return []
+    print('    -> %d candidate(s), tried in this order:' % len(cands))
+    for i, (v, why) in enumerate(cands, 1):
+        print('       %d. %-22s (%s)' % (i, fmt(v), why))
+    return [c[0] for c in cands]
+
+
+def do_service_reset(sess, serials, show=False):
+    """Run the Epson "rw" service command (firmware level).
+
+    Reference: reinkpy Device.do_rw. reinkpy's own docstring is unsure what the
+    command does ('for "reset waste"?'), so every raw reply is printed verbatim
+    instead of being interpreted. Candidates are tried until one reply contains
+    ":OK;".
+    """
+    if not serials:
+        print('\n  !! No serial number available - cannot build the "rw" command.')
+        return False
+    print('\n  >>> SERVICE COMMAND "rw" (firmware level)')
+    for i, sn in enumerate(serials, 1):
+        try:
+            digest = hashlib.sha1(sn.encode("ascii")).hexdigest()
+        except Exception as e:
+            print('    [%d/%d] skipped (not ASCII): %s' % (i, len(serials), e))
+            continue
+        print('    [%d/%d] serial=%-22s sha1=%s'
+              % (i, len(serials), (sn if show else mask_serial(sn)), digest))
+        resp = sess.service_rw(sn)
+        if resp is None:
+            print('          no reply (timed out)')
+            continue
+        print('          raw reply: %r' % resp)
+        if b":OK;" in resp:
+            print('          -> ACCEPTED (reply contains ":OK;")')
+            return True
+        print('          -> not accepted')
+    print('    -> No candidate was clearly accepted. Judge from the raw replies above.')
+    return False
+
+
 def resolve_input_path(path):
     """A bare filename (no directory component) is looked up in the CWD first, then next to the script."""
     if os.path.isfile(path):
@@ -464,14 +763,18 @@ def do_restore(sess, path):
         data = json.load(f)
     cells = data.get("bank0", {})
     print('\n  Restoring from backup: %s' % path)
-    n = 0
-    for a in WASTE_ADDRS:
+    n, missing = 0, []
+    for a in RESTORE_ADDRS:
         key = "%02X" % a
-        if key in cells and cells[key] is not None:
-            if sess.write_eeprom(a, int(cells[key])):
-                print("    - 0x%04X <- %d" % (a, cells[key]))
-                n += 1
-    print('    %d cells restored.' % n)
+        if key not in cells or cells[key] is None:
+            missing.append(key)
+            continue
+        if sess.write_eeprom(a, int(cells[key])):
+            print("    - 0x%04X <- %d" % (a, cells[key]))
+            n += 1
+    print('    %d/%d cells restored.' % (n, len(RESTORE_ADDRS)))
+    if missing:
+        print('    !! not present in this backup: %s' % ', '.join(missing))
 
 
 # --------------------------------------------------------------------------- #
@@ -498,8 +801,17 @@ def main():
         print('Windows only.')
         sys.exit(1)
     ap = argparse.ArgumentParser(description='Epson L3251 waste ink pad counter reset over USB (D4)')
-    ap.add_argument("--reset", action="store_true", help='RESET the counters (writes to the printer!)')
-    ap.add_argument("--restore", metavar='FILE', help='Write the six counter cells back from a backup JSON')
+    ap.add_argument("--reset", action="store_true", help='RESET the six known counter cells (writes!)')
+    ap.add_argument("--reset-full", action="store_true",
+                     help='RESET the FULL cell set from the reinkpy spec (%d cells, three of them to 0x5E; writes!)'
+                          % len(FULL_RESET_CELLS))
+    ap.add_argument("--service-reset", action="store_true",
+                     help='Run the Epson "rw" service command at firmware level (writes!)')
+    ap.add_argument("--serial", metavar='SN',
+                     help='Serial string to hash for --service-reset (overrides auto-detection)')
+    ap.add_argument("--unverified-percent", action="store_true",
+                     help='Also print the percentage computed from the UNVERIFIED divisors')
+    ap.add_argument("--restore", metavar='FILE', help='Write every waste-related cell back from a backup JSON')
     ap.add_argument("--no-backup", action="store_true", help='Do NOT take a backup before writing')
     ap.add_argument("--instance-id", metavar="IID",
                      default=os.environ.get("EPSON_INSTANCE_ID"),
@@ -523,9 +835,11 @@ def main():
     serial = read_serial(sess)
     print('  Serial:', serial if args.show_serial else mask_serial(serial))
 
+    pct = args.unverified_percent
     try:
         if args.restore:
-            read_waste(sess)
+            read_waste(sess, pct)
+            read_extras(sess)
             if args.no_backup:
                 print('\n  --no-backup given: skipping the safety backup before restore.')
             else:
@@ -533,31 +847,48 @@ def main():
                 save_backup_file(cells)
             do_restore(sess, args.restore)
             print('\n  After restore:')
-            read_waste(sess)
+            read_waste(sess, pct)
+            read_extras(sess)
             return
 
-        before = read_waste(sess)
+        writing = args.reset or args.reset_full or args.service_reset
+        read_waste(sess, pct)
+        read_extras(sess)
 
-        if not args.reset:
+        if not writing:
             print('\n  (READ-ONLY mode - nothing was written.)')
             if not args.no_backup:
                 cells = backup_bank0(sess)
                 save_backup_file(cells)
-            print('\n  Add  --reset  to the command to reset the counters.')
+            print('\n  Add --reset, --reset-full or --service-reset to write.')
             return
 
-        # --- reset path ---
+        if args.reset and args.reset_full:
+            print('\n  !! --reset and --reset-full are mutually exclusive. Pick one.')
+            sys.exit(2)
+
+        # --- write path ---
         if not args.no_backup:
             cells = backup_bank0(sess)
             save_backup_file(cells)
 
-        ok = do_reset(sess)
-        print('\n  State after the reset:')
-        read_waste(sess)
+        ok = True
+        if args.reset_full:
+            ok &= do_full_reset(sess)
+        elif args.reset:
+            ok &= do_reset(sess)
+        if args.service_reset:
+            sns = serial_candidates(sess, args.serial, args.show_serial)
+            ok &= do_service_reset(sess, sns, args.show_serial)
+
+        print('\n  State after the write:')
+        read_waste(sess, pct)
+        read_extras(sess)
         if ok:
-            print('\n  DONE. Power the printer OFF and ON with its own button, then check the error.')
+            print('\n  DONE. Power the printer OFF and ON with its own button, then run this'
+                  '\n  script again in read-only mode and compare the values.')
         else:
-            print('\n  WARNING: some cells could not be reset; check the state above.')
+            print('\n  WARNING: at least one step did not report success; check the output above.')
     finally:
         sess.close()
 

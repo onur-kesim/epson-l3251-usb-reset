@@ -6,7 +6,8 @@ to the Windows printer channel.
 
 * No driver replacement (no Zadig, no libusb).
 * No external dependencies — Python standard library only (`ctypes`).
-* Read-only by default. Writing requires an explicit `--reset`.
+* Read-only by default. Writing requires an explicit `--reset`, `--reset-full`
+  or `--service-reset`.
 
 ---
 
@@ -64,14 +65,26 @@ it, and a Python one can. That is the whole reason this repository exists.
 |---|---|---|
 | Read counters | yes | *(none)* |
 | Full bank-0 EEPROM backup (0x00–0xFF, 256 cells) written to a timestamped JSON | yes | *(none)* |
-| Write to EEPROM | **no** | `--reset` |
+| Write zeros to the six known counter cells | **no** | `--reset` |
+| Write the full spec cell set (14 cells, three of them to `0x5E`) | **no** | `--reset-full` |
+| Run the firmware-level Epson `rw` service command | **no** | `--service-reset` |
+| Force the serial string hashed by `--service-reset` | **no** | `--serial <SN>` |
+| Also print the percentage from the **unverified** divisors | **no** | `--unverified-percent` |
 | Skip the backup | **no** | `--no-backup` |
-| Write the six counter cells back from a backup file (a safety backup is taken first) | **no** | `--restore <file.json>` |
+| Write every waste-related cell back from a backup file (a safety backup is taken first) | **no** | `--restore <file.json>` |
 | Print the serial number in full (only the last 4 characters are shown by default) | **no** | `--show-serial` |
 
-Running the script with no arguments **cannot write anything**. The reset path
-writes zeros only to the six waste-counter cells (`0x30 0x31 0x32 0x33 0xFC 0xFD`)
-and reads each one back to confirm.
+Running the script with no arguments **cannot write anything**.
+
+`--reset` writes zeros to six cells (`0x30 0x31 0x32 0x33 0xFC 0xFD`).
+`--reset-full` writes the whole cell set the reinkpy spec lists for this model
+group (`0x1C 0x2F 0x30 0x31 0x32 0x33 0x34 0x35 0x36 0x37 0xFC 0xFD 0xFE 0xFF`),
+and **three of those reset to `0x5E`, not to zero** (`0x36 0x37 0xFF`). Both
+paths read every cell back to confirm. The two flags are mutually exclusive.
+
+`--service-reset` writes nothing to EEPROM directly: it sends the firmware's own
+`rw` (reset waste) service command. See the verification section below for what
+is known and what is not.
 
 `epson_usb_probe.py` is a strictly read-only diagnostic: it contains no EEPROM
 write command at all. It issues one EEPROM read per candidate interface and
@@ -83,8 +96,20 @@ prints the full D4 handshake, for when the main script cannot connect.
 # Read state and take a backup — writes nothing to the printer
 py epson_l3251_usb_reset.py
 
-# Reset the waste ink pad counters (writes!)
+# Reset the six known counter cells (writes!)
 py epson_l3251_usb_reset.py --reset
+
+# Reset the full cell set from the reinkpy spec (writes!)
+py epson_l3251_usb_reset.py --reset-full
+
+# Firmware-level "rw" service reset (writes!)
+py epson_l3251_usb_reset.py --service-reset
+
+# ...with an explicit serial string to hash
+py epson_l3251_usb_reset.py --service-reset --serial <SN>
+
+# Also show the percentage from the UNVERIFIED divisors
+py epson_l3251_usb_reset.py --unverified-percent
 
 # Restore counter cells from a previous backup
 py epson_l3251_usb_reset.py --restore epson_backup_bank0_<timestamp>.json
@@ -125,7 +150,12 @@ Three things to know before you rely on this:
   values without warning.
 * **A bare filename passed to `--restore`** is looked up in the current
   directory first, then next to the script.
-* **`--restore` writes back the six waste-counter cells only**, not all 256.
+* **`--restore` writes back every cell any write path can touch** — the same
+  fourteen `--reset-full` uses — not all 256. So a `--reset-full` run is
+  undoable from a backup taken before it.
+
+`--reset-full` reaches eight cells `--reset` never touched, so take a backup
+before the first run — the default behaviour already does.
 
 The tool never writes outside bank 0 (`0x00`–`0xFF`), and within it only to the
 six waste-counter cells.
@@ -136,6 +166,83 @@ Verified on an Epson L3251 over USB on Windows (2026-08-28): D4 connect with
 the credit handshake, EEPROM reads, waste-counter decoding, a full 256-cell
 bank-0 backup, and one successful `--reset` run — the six cells were written
 and read back as zero.
+
+Measured on 2026-09-04, third session, same printer:
+
+* **The divisors are wrong.** With the main pad at `raw=15128` the old
+  arithmetic printed `%238 FULL`, while the printer itself reported **no error
+  at all**. The divisors (6345 / 3416 / 1300) came from a public gist and were
+  never checked. Raw values are real; percentages are not, which is why they are
+  no longer printed unless `--unverified-percent` is passed.
+* **The firmware restores the main pad counter across a power cycle.** After a
+  successful `--reset` all six cells read back as 0, but after switching the
+  printer off and on `0x30 0x31` came back as `15128` (`0x3B18`). The secondary
+  and platen cells stayed at 0. So the firmware holds that counter in RAM and
+  writes it back to EEPROM at power-on.
+* **`--reset` was incomplete.** The reinkpy spec group for this model
+  (`rkey=0x364A`, `wkey="Nbsjcbzb"`, model list includes L3251) lists fourteen
+  cells; the tool wrote six. Eight cells were never touched, and five of them
+  measured away from their spec reset values (`0x1C=20`, `0x34=131`, `0x35=47`,
+  `0x36=104`, `0xFF=104`). Whether that is what the power-on write-back reads
+  from is **unmeasured** — it is the reason `--reset-full` exists.
+* **The two serial numbers do not agree.** The EEPROM holds ten printable
+  characters at 0x0644-0x064D. The USB device descriptor reports a longer
+  string: the ASCII-hex of the first eight of those characters plus a trailing
+  `00` byte. Shape only, with a made-up serial: EEPROM `ABCD012345` would appear
+  on the USB side as `414243443031323300`. This printer's own serial is not
+  printed here, and the tool masks it in its output by default. reinkpy hashes the **USB descriptor** string, and Windows does not
+  preserve that string's letter case, so `--service-reset` tries four candidates
+  in order and stops at the first reply containing `:OK;`.
+
+Not verified: what the `rw` command actually does. reinkpy's own docstring reads
+*"Run generic \"rw\" command (for \"reset waste\"?)"* — the question mark is
+the author's. Every raw reply is printed verbatim rather than interpreted.
+
+### The `--reset-full` result (2026-09-04)
+
+* **The full cell set survives a power cycle.** All fourteen cells were written
+  and read back as intended, the printer was switched off and on at its own
+  button, and the main pad still read `0`. The earlier run, which wrote only six
+  cells, came back as `15128` after exactly the same test. The single variable
+  between the two runs is the eight extra cells. **One trial on each side** —
+  strong, not conclusive.
+* **The firmware changed seven other cells by itself** in the same window:
+  `0xC0 0xC1` went `303 -> 0` read as a little-endian pair, `0xD4 0xD5` and
+  `0xD8 0xD9` each dropped by exactly **720**, and `0x58` went `168 -> 174`
+  (that cell has been seen oscillating between those two values across runs).
+  None of them is identified.
+* GUESS, not measurement: `0xC0 0xC1` is a countdown that reached zero and
+  triggered a power-on cleaning, and the two pairs that dropped by 720 are ink
+  or usage counters spent by it.
+* **Open question.** If a cleaning did run at power-on, the waste counters
+  should have moved off zero. They did not. Either the increment is deferred, or
+  no cleaning ran. Worth watching on the next read.
+
+### Second power cycle, same day
+
+A second off/on with no printing in between, measured by diffing two full
+bank-0 backups:
+
+* **All three waste counters: `0 -> 0`.** The reset held a second time, and a
+  plain power cycle costs the waste pads **nothing**. The `52248 -> 52504` climb
+  seen in the first session was therefore not power-cycle cost — it was the
+  counter being re-derived from the cells `--reset` never wrote.
+* `0xD4 0xD5` and `0xD8 0xD9` moved in lockstep again, `-144` each this time
+  against `-720` on the previous cycle — exactly five times as much. Consistent
+  with the first power-on running some larger operation and this one being an
+  ordinary start. Neither pair is identified.
+* `0xC0 0xC1` stayed at `0`; it did **not** reload a new value. That weakens the
+  countdown guess above rather than confirming it.
+* `0x92` went `0 -> 2`. Unidentified.
+
+Two power cycles, zero pad movement, so the earlier open question resolves the
+dull way: whatever the printer did at power-on, it did not charge the waste
+pads for it.
+
+Still not verified: behaviour across normal printing over days, and across a
+borderless photo run, which is what fills the platen pad. `--service-reset`
+(the `rw` command) has **never been executed** on this printer — the full cell
+reset made it unnecessary.
 
 Not verified: any other model, any other OS, and any behaviour of this code
 outside the L3251 it was written against. The waste-counter addresses and the
@@ -149,7 +256,11 @@ The EEPROM command format and the waste-counter addresses for this printer
 generation come from existing open-source reverse-engineering work:
 
 * [`reinkpy`](https://codeberg.org/atufi/reinkpy) (AGPL-3.0) — model database
-  (`epson.toml`), which is where the addresses and divisors used here come from.
+  (`epson.toml`), which is where the EEPROM addresses, the read/write keys and
+  the `--reset-full` cell set come from, plus `epson.py`, the reference for the
+  `rw` service command frame. The **divisors are not from reinkpy** — reinkpy's
+  spec has none. They came from a public gist and are unverified; see the
+  verification section.
 * [`epson_print_conf`](https://github.com/Ircama/epson_print_conf) — protocol
   documentation and model data.
 * [`abrasive/epson-reversing`](https://github.com/abrasive/epson-reversing) —
