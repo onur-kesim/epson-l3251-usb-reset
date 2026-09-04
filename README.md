@@ -249,6 +249,49 @@ Two power cycles, zero pad movement, so the earlier open question resolves the
 dull way: whatever the printer did at power-on, it did not charge the waste
 pads for it.
 
+### Ten bordered photo pages, from a clean zero (2026-09-04)
+
+With every counter at 0, ten photo pages were printed **with borders**, in one
+uninterrupted run, no power cycle and no manual cleaning. Diffing the full
+bank-0 backups taken before and after:
+
+* **The main counter is mirrored in three places.** `0x30 0x31`, `0x34 0x35` and
+  `0xC0 0xC1` each moved by exactly **+17**, in lockstep. That is the whole
+  explanation for the reset saga in this file: zeroing `0x30 0x31` alone left
+  the value sitting in a mirror, and the firmware restored it at the next
+  power-on. `0xC0 0xC1` is not in the reinkpy spec set, was never written by
+  this tool, and was observed being synced *down* to zero by the firmware at
+  the first power-on after `--reset-full` — so it is derived, not authoritative.
+  An earlier note in this file guessed `0xC0 0xC1` was a countdown timer. It is
+  not; that guess is withdrawn.
+* **1.7 units per photo page.** 17 units for ten pages, cleaning during the run
+  included. Against a threshold of 6346 that is roughly 3700 photo pages, though
+  a text page will not cost the same as a photo.
+* **Bordered printing does not touch the platen pad.** `0xFC 0xFD` stayed at 0
+  through all ten pages, as did the secondary counter. The platen pad really is
+  fed by borderless printing, and its physical part on this chassis is a
+  separate one: Epson `1746666`, "POROUS PAD, PAPERGUIDE, FRONT".
+* Two other pairs moved a lot and are still unidentified: `0xD4 0xD5` +4199 and
+  `0xD8 0xD9` +11458. They had previously moved in lockstep on power cycles
+  (−144, then −720) but did not here, so they are two different quantities, not
+  one duplicated. Photo pages use a lot of ink; that is as far as the evidence
+  goes.
+
+### Reset only what you actually serviced
+
+`--reset-full` zeroes every waste-related cell in one go, which is what makes it
+survive a power cycle. The consequence is worth stating plainly: **a counter you
+zero for a pad you did not replace now under-reports by exactly the value you
+erased.** The pads in the waste ink tank and the platen pad
+(Epson part `1746666`, "POROUS PAD, PAPERGUIDE, FRONT" on this chassis) are
+different physical parts with different counters, and people usually replace the
+tank pads only.
+
+If that applies to you, take the reading from a backup taken *before* the reset
+and keep it: that number is the offset you must add to every later reading of
+that counter for the rest of that pad's life. The backup JSON already holds it,
+which is one more reason the tool takes one before every write.
+
 Still not verified: behaviour across normal printing over days, and across a
 borderless photo run, which is what fills the platen pad. `--service-reset`
 (the `rw` command) has **never been executed** on this printer — the full cell

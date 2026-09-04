@@ -36,7 +36,7 @@ import struct
 import sys
 import time
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --------------------------------------------------------------------------- #
@@ -88,6 +88,19 @@ FULL_RESET_CELLS = [
 EXTRA_WATCH = [
     (0x1C, 0x00), (0x2F, 0x00), (0x34, 0x00), (0x35, 0x00),
     (0x36, 0x5E), (0x37, 0x5E), (0xFE, 0x00), (0xFF, 0x5E),
+]
+
+# The main waste counter is MIRRORED. Measured 2026-09-04: ten bordered photo
+# pages moved all three of these pairs by exactly +17, in lockstep. This is why
+# zeroing 0x30/0x31 alone never survived a power cycle - the firmware restored
+# the value from a mirror that was still holding it. 0xC0/0xC1 is NOT in the
+# reinkpy spec and is NOT written by any reset path here; it was observed to be
+# synced DOWN to zero by the firmware at the first power-on after --reset-full,
+# so it is derived rather than authoritative. Shown, never written.
+MIRROR_CELLS = [
+    ([0x30, 0x31], 'main counter'),
+    ([0x34, 0x35], 'mirror A (in the spec reset set)'),
+    ([0xC0, 0xC1], 'mirror B (OUTSIDE the spec set, never written here)'),
 ]
 
 # Every cell any write path can touch. --restore must cover all of them,
@@ -583,6 +596,19 @@ def read_extras(sess):
         else:
             note = '   <-- NOT at the spec reset value (%d)' % target
         print('    - 0x%02X: %s%s' % (a, ('%3d' % v) if v is not None else '  ?', note))
+    print('\n  Mirrors of the main counter (read-only; they should agree):')
+    seen = []
+    for addrs, label in MIRROR_CELLS:
+        vals = [sess.read_eeprom(a) for a in addrs]
+        if None in vals:
+            print('    - %-16s 0x%02X/0x%02X: READ FAILED' % (label, addrs[0], addrs[1]))
+            continue
+        val = sum(v << (8 * i) for i, v in enumerate(vals))
+        seen.append(val)
+        print('    - 0x%02X/0x%02X  %-46s %d' % (addrs[0], addrs[1], label, val))
+    if len(seen) > 1 and len(set(seen)) > 1:
+        print('    !! The mirrors DISAGREE. A reset that leaves one of them behind will')
+        print('       be undone at the next power-on. Use --reset-full, not --reset.')
     return out
 
 
