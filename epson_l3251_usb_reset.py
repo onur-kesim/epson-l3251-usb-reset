@@ -45,18 +45,25 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RKEY = [0x4A, 0x36]                                   # read/write model code (74,54)
 WKEY = bytes([78, 98, 115, 106, 99, 98, 122, 98])    # "Nbsjcbzb"
 
-# Waste ink counter groups: (addresses, divisor, label)
+# Waste ink counter groups: (addresses, divisor, divisor_verified, label)
 #
-# !! THE DIVISORS ARE UNVERIFIED. They come from a public gist and have never
-# been checked against this printer. Measured 2026-09-04: with the main pad at
-# raw=15128 this arithmetic claimed ">100%, FULL" while the printer reported NO
-# error at all. So the divisors do not match the firmware's real thresholds.
-# The RAW values are real; the percentages are not. Nothing is printed as a
-# percentage unless --unverified-percent is passed explicitly.
+# BYTE ORDER: each pair is LITTLE-ENDIAN - the first address holds the LOW byte.
+# Reading it big-endian (as this tool did until v0.2.0) inflates the value by up
+# to 256x and makes every counter look permanently full. Ground truth from this
+# printer, decisive because the error state is observable:
+#     0x30=0xCC 0x31=0x18 -> LE 6348 = 100.0%  -> printer DID show the error
+#     0x30=0x3B 0x31=0x18 -> LE 6203 =  97.7%  -> printer did NOT show it
+# Big-endian gives 52248 and 15128 for the same two readings - both "full",
+# which cannot explain the error clearing. Little-endian explains it exactly.
+#
+# The main divisor is corroborated independently: a reporter on
+# Ircama/epson_print_conf issue #35 measured 0x18CA = 6346 as exactly 100.00%
+# ("the divider for this family is 63.46"). The other two divisors are only
+# plausible - they have no such anchor and are printed with a leading "~".
 WASTE_COUNTERS = [
-    ([0x30, 0x31], 6345, 'Main waste pad'),
-    ([0x32, 0x33], 3416, 'Secondary pad'),
-    ([0xFC, 0xFD], 1300, 'Borderless/platen pad'),
+    ([0x30, 0x31], 6346, True,  'Main waste pad'),
+    ([0x32, 0x33], 3416, False, 'Secondary pad'),
+    ([0xFC, 0xFD], 1300, False, 'Borderless/platen pad'),
 ]
 WASTE_ADDRS = [0x30, 0x31, 0x32, 0x33, 0xFC, 0xFD]
 
@@ -110,7 +117,13 @@ def build_service_rw_cmd(serial):
     length and the payload. Payload is 1 + 20 = 21 bytes.
 
     reinkpy hashes info['serial_number'], i.e. the USB iSerialNumber STRING
-    DESCRIPTOR - not the serial stored in EEPROM. See usb_serial_candidates().
+    DESCRIPTOR. A reporter on Ircama/epson_print_conf issue #35 got a ":OK;"
+    out of this command using the PLAIN-TEXT serial instead, which is what the
+    EEPROM holds here, so the plain serial is tried first. Both are offered.
+
+    Note what this command is: a TEMPORARY reset. The same report states it does
+    not survive a power cycle. --reset-full writes EEPROM and does survive, so
+    this is a fallback, not the main path.
     """
     payload = b"\x00" + hashlib.sha1(serial.encode("ascii")).digest()
     return b"rw" + struct.pack("<H", len(payload)) + payload
@@ -529,12 +542,14 @@ class D4Session:
 # --------------------------------------------------------------------------- #
 #  High-level operations                                                       #
 # --------------------------------------------------------------------------- #
-def read_waste(sess, show_pct=False):
-    """Print the RAW counter values. No percentage and no FULL label: the
-    divisors are unverified and were measured to disagree with the firmware."""
-    print('\n  Waste ink counters (RAW - divisors unverified, see the note above):')
+def read_waste(sess):
+    """Print the counter values, decoded little-endian (see the table above).
+
+    The main pad's divisor is corroborated; the other two are marked "~".
+    """
+    print('\n  Waste ink counters:')
     out = []
-    for addrs, div, label in WASTE_COUNTERS:
+    for addrs, div, verified, label in WASTE_COUNTERS:
         vals = []
         for a in addrs:
             v = sess.read_eeprom(a)
@@ -543,12 +558,13 @@ def read_waste(sess, show_pct=False):
             print('    - %-26s: READ FAILED (%r)' % (label, vals))
             out.append((label, None, None))
             continue
-        raw = int("".join("%02X" % v for v in vals), 16)
-        line = '    - %-26s: raw=%-6d (0x%04X)' % (label, raw, raw)
-        if show_pct:
-            line += '   [UNVERIFIED: %.2f%% of %d]' % ((raw / div) * 100.0, div)
-        print(line)
-        out.append((label, raw, (raw / div) * 100.0))
+        raw = sum(v << (8 * i) for i, v in enumerate(vals))     # little-endian
+        pct = (raw / div) * 100.0
+        mark = '' if verified else '~'
+        note = '' if verified else '  (divisor not corroborated)'
+        flag = '   <-- FULL' if (verified and pct >= 100.0) else ''
+        print('    - %-26s: %s%6.2f%%   raw=%-6d%s%s' % (label, mark, pct, raw, note, flag))
+        out.append((label, raw, pct))
     return out
 
 
@@ -667,9 +683,10 @@ def hex_decode_serial(v):
 def serial_candidates(sess, override=None, show=False):
     """Ordered list of strings to try as the "rw" hash input.
 
-    reinkpy hashes info['serial_number'], i.e. the USB iSerialNumber STRING
-    DESCRIPTOR. MEASURED on this printer (2026-09-04): the two sources do NOT
-    agree -
+    reinkpy hashes info['serial_number'], the USB iSerialNumber STRING
+    DESCRIPTOR; a report on epson_print_conf issue #35 instead used the
+    plain-text serial and got ":OK;", so the plain one is tried first.
+    MEASURED on this printer (2026-09-04): the two sources do NOT agree -
     Shapes only, illustrated with a made-up serial - never the real one:
         EEPROM 0x0644-0x064D : ABCD012345            (plain text, 10 chars)
         USB parent instance  : 414243443031323300    (ASCII-hex of "ABCD0123"
@@ -698,13 +715,13 @@ def serial_candidates(sess, override=None, show=False):
         if v and all(v != c[0] for c in cands):
             cands.append((v, why))
 
+    if eeprom and eeprom != '(unreadable)':
+        add(eeprom, 'EEPROM plain-text serial')
+    for u in usb:
+        add(hex_decode_serial(u), 'USB descriptor, hex-decoded')
     for u in usb:
         add(u.upper(), 'USB descriptor, upper case')
         add(u.lower(), 'USB descriptor, lower case')
-    if eeprom and eeprom != '(unreadable)':
-        add(eeprom, 'EEPROM text serial')
-    for u in usb:
-        add(hex_decode_serial(u), 'USB descriptor, hex-decoded')
     if not cands:
         return []
     print('    -> %d candidate(s), tried in this order:' % len(cands))
@@ -806,11 +823,9 @@ def main():
                      help='RESET the FULL cell set from the reinkpy spec (%d cells, three of them to 0x5E; writes!)'
                           % len(FULL_RESET_CELLS))
     ap.add_argument("--service-reset", action="store_true",
-                     help='Run the Epson "rw" service command at firmware level (writes!)')
+                     help='Run the Epson "rw" command - a TEMPORARY reset that does not survive a power cycle (writes!)')
     ap.add_argument("--serial", metavar='SN',
                      help='Serial string to hash for --service-reset (overrides auto-detection)')
-    ap.add_argument("--unverified-percent", action="store_true",
-                     help='Also print the percentage computed from the UNVERIFIED divisors')
     ap.add_argument("--restore", metavar='FILE', help='Write every waste-related cell back from a backup JSON')
     ap.add_argument("--no-backup", action="store_true", help='Do NOT take a backup before writing')
     ap.add_argument("--instance-id", metavar="IID",
@@ -835,10 +850,9 @@ def main():
     serial = read_serial(sess)
     print('  Serial:', serial if args.show_serial else mask_serial(serial))
 
-    pct = args.unverified_percent
     try:
         if args.restore:
-            read_waste(sess, pct)
+            read_waste(sess)
             read_extras(sess)
             if args.no_backup:
                 print('\n  --no-backup given: skipping the safety backup before restore.')
@@ -847,12 +861,12 @@ def main():
                 save_backup_file(cells)
             do_restore(sess, args.restore)
             print('\n  After restore:')
-            read_waste(sess, pct)
+            read_waste(sess)
             read_extras(sess)
             return
 
         writing = args.reset or args.reset_full or args.service_reset
-        read_waste(sess, pct)
+        read_waste(sess)
         read_extras(sess)
 
         if not writing:
@@ -882,7 +896,7 @@ def main():
             ok &= do_service_reset(sess, sns, args.show_serial)
 
         print('\n  State after the write:')
-        read_waste(sess, pct)
+        read_waste(sess)
         read_extras(sess)
         if ok:
             print('\n  DONE. Power the printer OFF and ON with its own button, then run this'
