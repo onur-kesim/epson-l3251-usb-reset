@@ -1,0 +1,44 @@
+{
+  "_aciklama": "Ana atik sayacinin (0x30/0x31, bolen=6346) donanimsiz dogrulanabilir vaka kumesi. testler/test_cozucu.py bu dosyayi okur; her satirda 'kaynak' zorunludur (olcum sagilayiciligi). GOREV_CLAUDE_CODE_EF_testler_ve_ci.md / EF-1.",
+  "bolen": 6346,
+  "vakalar": [
+    {
+      "0x30": "0xCC",
+      "0x31": "0x18",
+      "beklenen_le": 6348,
+      "beklenen_yuzde": 100.03,
+      "yazici_hata_verdi_mi": true,
+      "kaynak": "yerel olcum 28 Agu 2026 (epson_backup_bank0_20260828_005821.json / _010024.json)"
+    },
+    {
+      "0x30": "0x3B",
+      "0x31": "0x18",
+      "beklenen_le": 6203,
+      "beklenen_yuzde": 97.75,
+      "yazici_hata_verdi_mi": false,
+      "kaynak": "yerel olcum 4 Eyl 2026 (epson_backup_bank0_20260904_101249.json)"
+    },
+    {
+      "0x30": "0xCA",
+      "0x31": "0x18",
+      "beklenen_le": 6346,
+      "beklenen_yuzde": 100.0,
+      "yazici_hata_verdi_mi": true,
+      "kaynak": "Ircama/epson_print_conf issue #35, bagimsiz capa (bu depodaki bir yerel yedekte yoktur; disaridan dogrulanan capa degeri)"
+    },
+    {
+      "0x30": "0x00",
+      "0x31": "0x00",
+      "beklenen_le": 0,
+      "beklenen_yuzde": 0.0,
+      "yazici_hata_verdi_mi": false,
+      "kaynak": "reset sonrasi, yerel olcum 4 Eyl 2026 (epson_backup_bank0_20260904_104134.json / _104547.json)"
+    }
+  ],
+  "ayna_vakasi": {
+    "aciklama": "0x30/0x31, 0x34/0x35 ve 0xC0/0xC1 uc cifti de ayni anda 17 tasimali - ana sayac uc yerde aynali (README: 'Ten bordered photo pages').",
+    "adres_ciftleri": [["0x30", "0x31"], ["0x34", "0x35"], ["0xC0", "0xC1"]],
+    "beklenen_deger": 17,
+    "kaynak": "yerel olcum 4 Eyl 2026, on kenarlikli fotograf testi (epson_backup_bank0_20260904_104547.json / _114257.json)"
+  }
+}

@@ -1,0 +1,172 @@
+{
+  "tarih": "2026-08-28/2026-09-04",
+  "olay": "bilinmeyen-kullanim-araligi",
+  "firmware": null,
+  "guc_dongusu_indeksi": null,
+  "hucreler": [
+    {
+      "adres": "0x01",
+      "once": 47,
+      "sonra": 15,
+      "delta": -32
+    },
+    {
+      "adres": "0x04",
+      "once": 9,
+      "sonra": 1,
+      "delta": -8
+    },
+    {
+      "adres": "0x06",
+      "once": 253,
+      "sonra": 33,
+      "delta": -220
+    },
+    {
+      "adres": "0x07",
+      "once": 52,
+      "sonra": 53,
+      "delta": 1
+    },
+    {
+      "adres": "0x10",
+      "once": 55,
+      "sonra": 101,
+      "delta": 46
+    },
+    {
+      "adres": "0x11",
+      "once": 88,
+      "sonra": 91,
+      "delta": 3
+    },
+    {
+      "adres": "0x12",
+      "once": 83,
+      "sonra": 129,
+      "delta": 46
+    },
+    {
+      "adres": "0x13",
+      "once": 1,
+      "sonra": 4,
+      "delta": 3
+    },
+    {
+      "adres": "0x2B",
+      "once": 213,
+      "sonra": 196,
+      "delta": -17
+    },
+    {
+      "adres": "0x2C",
+      "once": 0,
+      "sonra": 7,
+      "delta": 7
+    },
+    {
+      "adres": "0x30",
+      "once": 204,
+      "sonra": 205,
+      "delta": 1
+    },
+    {
+      "adres": "0x32",
+      "once": 180,
+      "sonra": 0,
+      "delta": -180
+    },
+    {
+      "adres": "0x33",
+      "once": 3,
+      "sonra": 0,
+      "delta": -3
+    },
+    {
+      "adres": "0x34",
+      "once": 89,
+      "sonra": 131,
+      "delta": 42
+    },
+    {
+      "adres": "0x35",
+      "once": 46,
+      "sonra": 47,
+      "delta": 1
+    },
+    {
+      "adres": "0x82",
+      "once": 105,
+      "sonra": 71,
+      "delta": -34
+    },
+    {
+      "adres": "0x83",
+      "once": 178,
+      "sonra": 145,
+      "delta": -33
+    },
+    {
+      "adres": "0x84",
+      "once": 11,
+      "sonra": 12,
+      "delta": 1
+    },
+    {
+      "adres": "0x87",
+      "once": 73,
+      "sonra": 233,
+      "delta": 160
+    },
+    {
+      "adres": "0x93",
+      "once": 14,
+      "sonra": 8,
+      "delta": -6
+    },
+    {
+      "adres": "0xC0",
+      "once": 97,
+      "sonra": 47,
+      "delta": -50
+    },
+    {
+      "adres": "0xC1",
+      "once": 2,
+      "sonra": 1,
+      "delta": -1
+    },
+    {
+      "adres": "0xD8",
+      "once": 248,
+      "sonra": 240,
+      "delta": -8
+    },
+    {
+      "adres": "0xD9",
+      "once": 6,
+      "sonra": 67,
+      "delta": 61
+    },
+    {
+      "adres": "0xDA",
+      "once": 6,
+      "sonra": 3,
+      "delta": -3
+    },
+    {
+      "adres": "0xFC",
+      "once": 94,
+      "sonra": 10,
+      "delta": -84
+    },
+    {
+      "adres": "0xFD",
+      "once": 1,
+      "sonra": 0,
+      "delta": -1
+    }
+  ],
+  "hukum": "Iki yedek arasinda ~9 gun var; bu araliktaki baski/guc dongusu sayisi kayit altina alinmamis, tek bir olaya atfedilemez. Fark yalnizca bilgi amacli tutulur; hicbir README bolumu bu araligi tek bir olay olarak anlatmaz.",
+  "kaynak": "epson_backup_bank0_20260828_010024.json / epson_backup_bank0_20260904_100449.json (ham fark)"
+}

@@ -177,35 +177,44 @@ class OVERLAPPED(ctypes.Structure):
                 ("Offset", wt.DWORD), ("OffsetHigh", wt.DWORD), ("hEvent", wt.HANDLE)]
 
 
-setupapi = ctypes.WinDLL("setupapi", use_last_error=True)
-kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-LPDWORD = ctypes.POINTER(wt.DWORD)
-POVERLAPPED = ctypes.POINTER(OVERLAPPED)
+# EF-0: this whole block is Win32-only (ctypes.WinDLL does not exist on other
+# platforms - the attribute itself is absent, so even referencing it raises
+# AttributeError at import time). Guarded so the pure-byte helpers above
+# (build_read_cmd, build_write_cmd, build_service_rw_cmd, the constant
+# tables) and the functions below that don't touch these globals until
+# called (read_waste, read_extras, hex_decode_serial, mask_serial, ...)
+# stay importable on Linux/macOS for CI. main() already exits immediately
+# on non-Windows, before any of this is ever used.
+if sys.platform == "win32":
+    setupapi = ctypes.WinDLL("setupapi", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    LPDWORD = ctypes.POINTER(wt.DWORD)
+    POVERLAPPED = ctypes.POINTER(OVERLAPPED)
 
-kernel32.CreateFileW.restype = wt.HANDLE
-kernel32.CreateFileW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, wt.LPVOID, wt.DWORD, wt.DWORD, wt.HANDLE]
-kernel32.CreateEventW.restype = wt.HANDLE
-kernel32.CreateEventW.argtypes = [wt.LPVOID, wt.BOOL, wt.BOOL, wt.LPCWSTR]
-kernel32.WriteFile.restype = wt.BOOL
-kernel32.WriteFile.argtypes = [wt.HANDLE, wt.LPCVOID, wt.DWORD, LPDWORD, POVERLAPPED]
-kernel32.ReadFile.restype = wt.BOOL
-kernel32.ReadFile.argtypes = [wt.HANDLE, wt.LPVOID, wt.DWORD, LPDWORD, POVERLAPPED]
-kernel32.WaitForSingleObject.restype = wt.DWORD
-kernel32.WaitForSingleObject.argtypes = [wt.HANDLE, wt.DWORD]
-kernel32.GetOverlappedResult.restype = wt.BOOL
-kernel32.GetOverlappedResult.argtypes = [wt.HANDLE, POVERLAPPED, LPDWORD, wt.BOOL]
-kernel32.CancelIo.restype = wt.BOOL
-kernel32.CancelIo.argtypes = [wt.HANDLE]
-kernel32.CloseHandle.restype = wt.BOOL
-kernel32.CloseHandle.argtypes = [wt.HANDLE]
-setupapi.SetupDiGetClassDevsW.restype = wt.HANDLE
-setupapi.SetupDiGetClassDevsW.argtypes = [ctypes.c_void_p, wt.LPCWSTR, wt.HWND, wt.DWORD]
-setupapi.SetupDiEnumDeviceInterfaces.restype = wt.BOOL
-setupapi.SetupDiEnumDeviceInterfaces.argtypes = [wt.HANDLE, ctypes.c_void_p, ctypes.c_void_p, wt.DWORD, ctypes.c_void_p]
-setupapi.SetupDiGetDeviceInterfaceDetailW.restype = wt.BOOL
-setupapi.SetupDiGetDeviceInterfaceDetailW.argtypes = [wt.HANDLE, ctypes.c_void_p, ctypes.c_void_p, wt.DWORD, LPDWORD, ctypes.c_void_p]
-setupapi.SetupDiDestroyDeviceInfoList.restype = wt.BOOL
-setupapi.SetupDiDestroyDeviceInfoList.argtypes = [wt.HANDLE]
+    kernel32.CreateFileW.restype = wt.HANDLE
+    kernel32.CreateFileW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, wt.LPVOID, wt.DWORD, wt.DWORD, wt.HANDLE]
+    kernel32.CreateEventW.restype = wt.HANDLE
+    kernel32.CreateEventW.argtypes = [wt.LPVOID, wt.BOOL, wt.BOOL, wt.LPCWSTR]
+    kernel32.WriteFile.restype = wt.BOOL
+    kernel32.WriteFile.argtypes = [wt.HANDLE, wt.LPCVOID, wt.DWORD, LPDWORD, POVERLAPPED]
+    kernel32.ReadFile.restype = wt.BOOL
+    kernel32.ReadFile.argtypes = [wt.HANDLE, wt.LPVOID, wt.DWORD, LPDWORD, POVERLAPPED]
+    kernel32.WaitForSingleObject.restype = wt.DWORD
+    kernel32.WaitForSingleObject.argtypes = [wt.HANDLE, wt.DWORD]
+    kernel32.GetOverlappedResult.restype = wt.BOOL
+    kernel32.GetOverlappedResult.argtypes = [wt.HANDLE, POVERLAPPED, LPDWORD, wt.BOOL]
+    kernel32.CancelIo.restype = wt.BOOL
+    kernel32.CancelIo.argtypes = [wt.HANDLE]
+    kernel32.CloseHandle.restype = wt.BOOL
+    kernel32.CloseHandle.argtypes = [wt.HANDLE]
+    setupapi.SetupDiGetClassDevsW.restype = wt.HANDLE
+    setupapi.SetupDiGetClassDevsW.argtypes = [ctypes.c_void_p, wt.LPCWSTR, wt.HWND, wt.DWORD]
+    setupapi.SetupDiEnumDeviceInterfaces.restype = wt.BOOL
+    setupapi.SetupDiEnumDeviceInterfaces.argtypes = [wt.HANDLE, ctypes.c_void_p, ctypes.c_void_p, wt.DWORD, ctypes.c_void_p]
+    setupapi.SetupDiGetDeviceInterfaceDetailW.restype = wt.BOOL
+    setupapi.SetupDiGetDeviceInterfaceDetailW.argtypes = [wt.HANDLE, ctypes.c_void_p, ctypes.c_void_p, wt.DWORD, LPDWORD, ctypes.c_void_p]
+    setupapi.SetupDiDestroyDeviceInfoList.restype = wt.BOOL
+    setupapi.SetupDiDestroyDeviceInfoList.argtypes = [wt.HANDLE]
 
 
 def find_usbprint_paths():
@@ -247,7 +256,8 @@ def find_usbprint_paths():
 # the same string is the last segment of the parent USB device's instance id
 # (USB\VID_04B8&PID_XXXX\<serial>). Bus-generated ids contain '&' and are not
 # serials, so they are skipped.
-cfgmgr32 = ctypes.WinDLL("cfgmgr32", use_last_error=True)
+# EF-0: same reasoning as the setupapi/kernel32 block above - cfgmgr32 is
+# Win32-only too.
 CR_SUCCESS = 0
 
 
@@ -256,15 +266,18 @@ class SP_DEVINFO_DATA(ctypes.Structure):
                 ("DevInst", wt.DWORD), ("Reserved", ctypes.POINTER(ctypes.c_ulong))]
 
 
-# Re-declare with a typed last parameter; None is still a valid argument, so the
-# existing find_usbprint_paths() calls keep working unchanged.
-setupapi.SetupDiGetDeviceInterfaceDetailW.argtypes = [
-    wt.HANDLE, ctypes.c_void_p, ctypes.c_void_p, wt.DWORD, LPDWORD,
-    ctypes.POINTER(SP_DEVINFO_DATA)]
-cfgmgr32.CM_Get_Parent.argtypes = [ctypes.POINTER(wt.DWORD), wt.DWORD, ctypes.c_ulong]
-cfgmgr32.CM_Get_Parent.restype = ctypes.c_ulong
-cfgmgr32.CM_Get_Device_IDW.argtypes = [wt.DWORD, wt.LPWSTR, ctypes.c_ulong, ctypes.c_ulong]
-cfgmgr32.CM_Get_Device_IDW.restype = ctypes.c_ulong
+if sys.platform == "win32":
+    cfgmgr32 = ctypes.WinDLL("cfgmgr32", use_last_error=True)
+
+    # Re-declare with a typed last parameter; None is still a valid argument, so
+    # the existing find_usbprint_paths() calls keep working unchanged.
+    setupapi.SetupDiGetDeviceInterfaceDetailW.argtypes = [
+        wt.HANDLE, ctypes.c_void_p, ctypes.c_void_p, wt.DWORD, LPDWORD,
+        ctypes.POINTER(SP_DEVINFO_DATA)]
+    cfgmgr32.CM_Get_Parent.argtypes = [ctypes.POINTER(wt.DWORD), wt.DWORD, ctypes.c_ulong]
+    cfgmgr32.CM_Get_Parent.restype = ctypes.c_ulong
+    cfgmgr32.CM_Get_Device_IDW.argtypes = [wt.DWORD, wt.LPWSTR, ctypes.c_ulong, ctypes.c_ulong]
+    cfgmgr32.CM_Get_Device_IDW.restype = ctypes.c_ulong
 
 
 def _looks_like_serial(seg):

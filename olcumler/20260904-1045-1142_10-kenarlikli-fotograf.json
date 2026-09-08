@@ -1,0 +1,142 @@
+{
+  "tarih": "2026-09-04",
+  "olay": "10-kenarlikli-fotograf",
+  "firmware": null,
+  "guc_dongusu_indeksi": null,
+  "hucreler": [
+    {
+      "adres": "0x01",
+      "once": 47,
+      "sonra": 15,
+      "delta": -32
+    },
+    {
+      "adres": "0x04",
+      "once": 13,
+      "sonra": 1,
+      "delta": -12
+    },
+    {
+      "adres": "0x06",
+      "once": 33,
+      "sonra": 36,
+      "delta": 3
+    },
+    {
+      "adres": "0x10",
+      "once": 101,
+      "sonra": 163,
+      "delta": 62
+    },
+    {
+      "adres": "0x12",
+      "once": 129,
+      "sonra": 191,
+      "delta": 62
+    },
+    {
+      "adres": "0x30",
+      "once": 0,
+      "sonra": 17,
+      "delta": 17
+    },
+    {
+      "adres": "0x34",
+      "once": 0,
+      "sonra": 17,
+      "delta": 17
+    },
+    {
+      "adres": "0x58",
+      "once": 174,
+      "sonra": 168,
+      "delta": -6
+    },
+    {
+      "adres": "0x82",
+      "once": 71,
+      "sonra": 87,
+      "delta": 16
+    },
+    {
+      "adres": "0x83",
+      "once": 145,
+      "sonra": 159,
+      "delta": 14
+    },
+    {
+      "adres": "0x87",
+      "once": 233,
+      "sonra": 243,
+      "delta": 10
+    },
+    {
+      "adres": "0x92",
+      "once": 2,
+      "sonra": 38,
+      "delta": 36
+    },
+    {
+      "adres": "0x93",
+      "once": 13,
+      "sonra": 22,
+      "delta": 9
+    },
+    {
+      "adres": "0xC0",
+      "once": 0,
+      "sonra": 17,
+      "delta": 17
+    },
+    {
+      "adres": "0xCE",
+      "once": 0,
+      "sonra": 23,
+      "delta": 23
+    },
+    {
+      "adres": "0xCF",
+      "once": 0,
+      "sonra": 60,
+      "delta": 60
+    },
+    {
+      "adres": "0xD0",
+      "once": 0,
+      "sonra": 1,
+      "delta": 1
+    },
+    {
+      "adres": "0xD4",
+      "once": 128,
+      "sonra": 231,
+      "delta": 103
+    },
+    {
+      "adres": "0xD5",
+      "once": 155,
+      "sonra": 171,
+      "delta": 16
+    },
+    {
+      "adres": "0xD6",
+      "once": 23,
+      "sonra": 24,
+      "delta": 1
+    },
+    {
+      "adres": "0xD8",
+      "once": 144,
+      "sonra": 82,
+      "delta": -62
+    },
+    {
+      "adres": "0xD9",
+      "once": 64,
+      "sonra": 109,
+      "delta": 45
+    }
+  ],
+  "hukum": "Temiz sifirdan on kenarlikli fotograf sayfasi, guc dongusu yok: ana sayac UC yerde birden (0x30/0x31, 0x34/0x35, 0xC0/0xC1) tam +17 hareket etti -- aynalama kaniti. Kenarlikli baski platen pedine (0xFC/0xFD) dokunmadi. 0xD4/0xD5 +4199, 0xD8/0xD9 +11458 (tanimlanmamis, murekkep/kullanim sayaclari olabilir).",
+  "kaynak": "README.md - 'Ten bordered photo pages, from a clean zero (2026-09-04)'; epson_backup_bank0_20260904_104547.json / _114257.json. Ayni +17 vakasi testler/altin_kume_cozucu.json'daki ayna_vakasi alanidir."
+}

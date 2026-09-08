@@ -1,0 +1,16 @@
+{
+  "tarih": "2026-09-04",
+  "olay": "durum-sabit",
+  "firmware": null,
+  "guc_dongusu_indeksi": null,
+  "hucreler": [
+    {
+      "adres": "0x93",
+      "once": 9,
+      "sonra": 13,
+      "delta": 4
+    }
+  ],
+  "hukum": "27 dakikada yalniz 0x93 (+4) degisti; atik sayaclari hareketsiz.",
+  "kaynak": "epson_backup_bank0_20260904_101249.json / _103910.json"
+}

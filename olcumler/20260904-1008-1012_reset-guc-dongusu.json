@@ -1,0 +1,52 @@
+{
+  "tarih": "2026-09-04",
+  "olay": "reset+guc-dongusu",
+  "firmware": null,
+  "guc_dongusu_indeksi": null,
+  "hucreler": [
+    {
+      "adres": "0x01",
+      "once": 15,
+      "sonra": 47,
+      "delta": 32
+    },
+    {
+      "adres": "0x04",
+      "once": 1,
+      "sonra": 13,
+      "delta": 12
+    },
+    {
+      "adres": "0x2B",
+      "once": 196,
+      "sonra": 0,
+      "delta": -196
+    },
+    {
+      "adres": "0x2C",
+      "once": 7,
+      "sonra": 0,
+      "delta": -7
+    },
+    {
+      "adres": "0x30",
+      "once": 205,
+      "sonra": 59,
+      "delta": -146
+    },
+    {
+      "adres": "0x58",
+      "once": 174,
+      "sonra": 168,
+      "delta": -6
+    },
+    {
+      "adres": "0xFC",
+      "once": 10,
+      "sonra": 0,
+      "delta": -10
+    }
+  ],
+  "hukum": "Ana sayac (0x30/0x31) LE 6349 (~100.05%) -> 6203 (97.75%) oldu. Ara adim (--reset ile 0'a inme) hicbir yedekte gorunmuyor, cunku arac yalniz yazmadan ONCEki durumu yedekler; bu satir --reset + ardindan gelen bir guc dongusunun BILESIK (net) etkisidir. 0xFC de --reset ile 0'a indi.",
+  "kaynak": "README.md - 'The firmware restores the main pad counter across a power cycle' (2026-09-04); epson_backup_bank0_20260904_100837.json / _101249.json. Ikinci yedegin 0x30/0x31 cifti ayni zamanda testler/altin_kume_cozucu.json'daki 0x3B/0x18 vakasidir."
+}

@@ -1,0 +1,94 @@
+{
+  "tarih": "2026-09-04",
+  "olay": "reset-full",
+  "firmware": null,
+  "guc_dongusu_indeksi": 1,
+  "hucreler": [
+    {
+      "adres": "0x1C",
+      "once": 20,
+      "sonra": 0,
+      "delta": -20
+    },
+    {
+      "adres": "0x30",
+      "once": 59,
+      "sonra": 0,
+      "delta": -59
+    },
+    {
+      "adres": "0x31",
+      "once": 24,
+      "sonra": 0,
+      "delta": -24
+    },
+    {
+      "adres": "0x34",
+      "once": 131,
+      "sonra": 0,
+      "delta": -131
+    },
+    {
+      "adres": "0x35",
+      "once": 47,
+      "sonra": 0,
+      "delta": -47
+    },
+    {
+      "adres": "0x36",
+      "once": 104,
+      "sonra": 94,
+      "delta": -10
+    },
+    {
+      "adres": "0x58",
+      "once": 168,
+      "sonra": 174,
+      "delta": 6
+    },
+    {
+      "adres": "0xC0",
+      "once": 47,
+      "sonra": 0,
+      "delta": -47
+    },
+    {
+      "adres": "0xC1",
+      "once": 1,
+      "sonra": 0,
+      "delta": -1
+    },
+    {
+      "adres": "0xD4",
+      "once": 224,
+      "sonra": 16,
+      "delta": -208
+    },
+    {
+      "adres": "0xD5",
+      "once": 158,
+      "sonra": 156,
+      "delta": -2
+    },
+    {
+      "adres": "0xD8",
+      "once": 240,
+      "sonra": 32,
+      "delta": -208
+    },
+    {
+      "adres": "0xD9",
+      "once": 67,
+      "sonra": 65,
+      "delta": -2
+    },
+    {
+      "adres": "0xFF",
+      "once": 104,
+      "sonra": 94,
+      "delta": -10
+    }
+  ],
+  "hukum": "14 hucrelik tam sifirlama seti yazildi (0x1C,0x30,0x31,0x34,0x35 -> 0; 0x36,0xFF -> 0x5E; 0x37/0x2F/0xFC/0xFD/0xFE zaten hedef degerdeydi) ve firmware ayni pencerede yedi hucreyi kendiliginden degistirdi: 0xC0/0xC1 303 -> 0, 0xD4/0xD5 ve 0xD8/0xD9 tam 720 dustu, 0x58 salindi (168 -> 174). Ana atik sayac 0'da kaldi.",
+  "kaynak": "README.md - 'The --reset-full result (2026-09-04)'; epson_backup_bank0_20260904_103910.json / _104134.json"
+}

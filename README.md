@@ -303,6 +303,26 @@ EEPROM command parameters come from prior open-source work (see Credits) and
 have not been independently re-derived for other models — do not assume they
 transfer.
 
+## Measurement records and hardware-free tests
+
+The narrative measurements above are also kept as structured, machine-readable
+diff records under [`olcumler/`](olcumler/) — one JSON file per consecutive pair
+of local `epson_backup_bank0_*.json` backups (those backups are git-ignored, see
+[Backups](#backups); only the derived records are committed). Each record follows
+`{tarih, olay, firmware, guc_dongusu_indeksi, hucreler:[{adres, once, sonra, delta}],
+hukum, kaynak}` and carries only cell-level deltas — never a serial number or an
+`InstanceId`.
+
+The little-endian/percentage decoding these numbers rely on is checked without any
+printer attached: [`testler/altin_kume_cozucu.json`](testler/altin_kume_cozucu.json)
+holds the golden cases (including the mirror case above), and
+[`testler/test_cozucu.py`](testler/test_cozucu.py) (stdlib `unittest`, no hardware,
+no network) verifies them, the command-frame byte layout, the full reset/restore
+cell tables, the mirror-mismatch warning, and — as a safety gate — that running the
+script with no arguments never calls `write_eeprom`.
+[`testler/mutant_kos.py`](testler/mutant_kos.py) proves that last suite isn't blind:
+it flips the decode to big-endian, confirms the tests go red, and restores the file.
+
 ## Credits
 
 The EEPROM command format and the waste-counter addresses for this printer

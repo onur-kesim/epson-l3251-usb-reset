@@ -1,0 +1,24 @@
+name: CI
+
+# EF-5: tek is, ubuntu-latest, donanim/ag gerektiren HICBIR sey kosmaz.
+# EF-0 sayesinde epson_l3251_usb_reset.py Linux'ta da import edilebilir
+# (Win32 ctypes.WinDLL cagrilari sys.platform == "win32" korumasi altinda).
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Altin kume + cozucu testleri (donanimsiz, agsiz)
+        run: python -m unittest discover testler
+
+      - name: Mutant kaniti (saglam=yesil, big-endian mutant=kirmizi olmali)
+        run: python testler/mutant_kos.py
