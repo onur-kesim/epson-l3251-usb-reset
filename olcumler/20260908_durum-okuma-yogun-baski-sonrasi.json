@@ -1,0 +1,35 @@
+{
+  "tarih": "2026-09-08",
+  "olay": "durum-okuma",
+  "cagri": "py epson_l3251_usb_reset.py   (argumansiz = salt-okunur; hicbir hucreye yazilmadi)",
+  "firmware": null,
+  "guc_dongusu_indeksi": null,
+  "hucreler": [
+    {
+      "adres": "0x30/0x31",
+      "once": 17,
+      "sonra": 298,
+      "delta": 281
+    },
+    {
+      "adres": "0x34/0x35",
+      "once": 17,
+      "sonra": 319,
+      "delta": 302
+    },
+    {
+      "adres": "0xC0/0xC1",
+      "once": 17,
+      "sonra": 281,
+      "delta": 264
+    },
+    {
+      "adres": "0xFC/0xFD",
+      "once": 0,
+      "sonra": 0,
+      "delta": 0
+    }
+  ],
+  "hukum": "Salt-okunur durum okumasi. Ana atik sayaci 0x30/0x31 = 298 -> %4.70 (bolen 6345, aracin kendi ciktisi). Onceki referans: 4 Eyl 11:42 tam sifirlama sonrasi 10 kenarlikli fotograf testi sonu = 17. Aradaki artis +281, sure 4.49 gun. SEBEP (Onur beyani, 8 Eyl): bu aralikta YOGUN FOTOGRAF BASKISI yapildi -- artis anomali degil, normal kullanim. Capraz teyit: kenarliksiz/platen pedi 0xFC/0xFD = 0 kaldi, yani baskilar kenarlikliydi; bu, 4 Eyl kontrollu testinden turetilen 1.7 sayac/kenarlikli-fotograf birimiyle uyumlu (+281 ~ 165 fotograf esdegeri). AYNALAR AYRISTI: 298 / 319 / 281 (aralarinda 38'e varan fark). 4 Eyl tam sifirlamadan sonra ucu birlikte tam +17 hareket etmisti; aynalama kosulsuz degil, sifirlama sonrasi bir sure gecerli. Aracin 'mirrors DISAGREE -> use --reset-full' uyarisi dogru yandi. 0x34=63 ve 0x35=1 spec sifirlama degerinde degil (beklenen 0). TAKVIME DAYALI PROJEKSIYON YAPILMADI: kalan kapasite 6345-298 = 6047 sayac ~ 3560 kenarlikli fotograf. Takvim tarihi ancak yillik baski hacmi varsayilirsa cikar; o hacim olculmedi.",
+  "kaynak": "Canli arac ciktisi 2026-09-08 23:29 TSI; epson_backup_bank0_20260908_232947.json (gitignore'da); birim hiz: olcumler/20260904-1045-1142_10-kenarlikli-fotograf.json"
+}
