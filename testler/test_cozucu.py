@@ -32,6 +32,18 @@ def _load_golden():
         return json.load(f)
 
 
+def _mirror_value_from_output(output, addr_lo, addr_hi):
+    """read_extras() bir aynanin COZULMUS (LE toplanmis) degerini satirin
+    sonuna basar: '    - 0x30/0x31  main counter ... 17'. Testin sahte
+    oturumun ham baytlarini degil, fonksiyonun gercekten hesapladigi sayiyi
+    kontrol etmesi icin bu satiri ayristirir."""
+    marker = "0x%02X/0x%02X" % (addr_lo, addr_hi)
+    for line in output.splitlines():
+        if marker in line:
+            return int(line.strip().split()[-1])
+    raise AssertionError("read_extras ciktisinda ayna satiri bulunamadi: %s" % marker)
+
+
 class FakeSession:
     """D4Session'i donanimsiz taklit eder: EEPROM durumu duz bir dict, yazmalar
     gercek yazicIya degil write_calls listesine gider."""
@@ -86,9 +98,14 @@ class GoldenSetDecodeTests(unittest.TestCase):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             ep.read_extras(fake)
-        self.assertNotIn("DISAGREE", buf.getvalue())
-        for lo_hex, _ in mirror["adres_ciftleri"]:
-            self.assertEqual(fake.read_eeprom(int(lo_hex, 16)), mirror["beklenen_deger"])
+        output = buf.getvalue()
+        self.assertNotIn("DISAGREE", output)
+        # fake.read_eeprom(...) sadece kurulan girdiyi geri verir -- bunun
+        # yerine read_extras()'in FIILEN hesapladigi (LE toplanmis) degeri
+        # kontrol et, yoksa cozme satiri mutasyona ugrasa da test farketmez.
+        for lo_hex, hi_hex in mirror["adres_ciftleri"]:
+            got = _mirror_value_from_output(output, int(lo_hex, 16), int(hi_hex, 16))
+            self.assertEqual(got, mirror["beklenen_deger"])
 
 
 class FrameBuilderTests(unittest.TestCase):
@@ -139,12 +156,36 @@ class MirrorCellsTests(unittest.TestCase):
     def test_mirror_cells_has_three_pairs(self):
         self.assertEqual(len(ep.MIRROR_CELLS), 3)
 
+    def test_read_extras_actually_decodes_mirrors_le(self):
+        """EF-3 kor nokta duzeltmesi (bagimsiz mutant taramasi bulgusu):
+        read_extras() icinde MIRROR_CELLS icin ayrica var olan IKINCI LE
+        cozme satiri (`val = sum(v << (8 * i) ...)`) burada FIILEN
+        cagrilir ve DONEN SAYI kontrol edilir -- yalniz uyari metni ya da
+        sahte oturumun ham girdisi degil. Bu test olmadan o satir
+        big-endian'a mutasyona ugrasa bile suit yesil kalirdi (0x30=17,
+        0x31=0 -> BE=17<<8=4352, ama hicbir assert bunu yakalamiyordu)."""
+        fake = FakeSession({0x30: 17, 0x31: 0, 0x34: 17, 0x35: 0, 0xC0: 17, 0xC1: 0})
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ep.read_extras(fake)
+        output = buf.getvalue()
+        self.assertNotIn("DISAGREE", output, "uc ayna da esit olmali, uyari otmemeli")
+        for lo, hi in ((0x30, 0x31), (0x34, 0x35), (0xC0, 0xC1)):
+            self.assertEqual(
+                _mirror_value_from_output(output, lo, hi), 17,
+                "0x%02X/0x%02X LE cozulmus deger 17 olmali" % (lo, hi))
+
     def test_mismatch_triggers_warning(self):
         fake = FakeSession({0x30: 17, 0x31: 0, 0x34: 17, 0x35: 0, 0xC0: 5, 0xC1: 0})
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             ep.read_extras(fake)
-        self.assertIn("DISAGREE", buf.getvalue())
+        output = buf.getvalue()
+        self.assertIn("DISAGREE", output)
+        # uyariyi tetikleyen degerlerin kendisi de dogru cozulmus olmali.
+        self.assertEqual(_mirror_value_from_output(output, 0x30, 0x31), 17)
+        self.assertEqual(_mirror_value_from_output(output, 0x34, 0x35), 17)
+        self.assertEqual(_mirror_value_from_output(output, 0xC0, 0xC1), 5)
 
     def test_agreement_does_not_trigger_warning(self):
         fake = FakeSession({0x30: 17, 0x31: 0, 0x34: 17, 0x35: 0, 0xC0: 17, 0xC1: 0})
