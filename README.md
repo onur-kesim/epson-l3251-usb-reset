@@ -1,5 +1,7 @@
 # Epson L3251 — Waste Ink Pad counter reset over USB (pure Python, Windows)
 
+[![CI](https://github.com/onur-kesim/epson-l3251-usb-reset/actions/workflows/ci.yml/badge.svg)](https://github.com/onur-kesim/epson-l3251-usb-reset/actions/workflows/ci.yml)
+
 Reads, backs up and — only when you explicitly ask — resets the waste ink pad
 counters of an **Epson L3251** over **USB**, speaking IEEE 1284.4 (D4) directly
 to the Windows printer channel.
