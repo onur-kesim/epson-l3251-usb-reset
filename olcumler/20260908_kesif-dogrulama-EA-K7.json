@@ -1,0 +1,17 @@
+{
+  "tarih": "2026-09-08",
+  "olay": "kesif-dogrulama",
+  "cagri": "py epson_usb_probe.py   (argumansiz; EPSON_INSTANCE_ID ortam degiskeni BOS dogrulandi)",
+  "firmware": null,
+  "guc_dongusu_indeksi": null,
+  "hucreler": [
+    {
+      "adres": "0x30",
+      "once": null,
+      "sonra": 42,
+      "delta": null
+    }
+  ],
+  "hukum": "E-A K7 beyani (Onur, gercek donanim). Gomulu makineye-ozel cihaz kimligi koddan sokuldukten sonra otomatik kesif TEK BASINA yetti: probe argumansiz kosuldu, USBPRINT arayuz GUID'i uzerinden uc Epson arayuzunu (mi_00/mi_01/mi_02) kendisi buldu, MI_01 oncelikli siralama dogru cikti, D4 el sikismasi tamamlandi (rev 0x10) ve 0x30 okumasi cevap verdi: EE:00302A -> 0x2A = 42. Arayuz: usb#vid_04b8&pid_118a&mi_01#<INSTANCE>#{28d78fad-5a12-11d1-ae5b-0000f803a8c2} (makineye ozel bolum kasitli maskelendi). SONUC: --instance-id / EPSON_INSTANCE_ID yedek yolu ISTEGE BAGLIDIR, zorunlu degil. SINIR: yalniz 0x30 dusuk baytini okur; 0x31 okunmadigi icin sayacin tam degeri ve yuzdesi bu kayittan TURETILEMEZ.",
+  "kaynak": "GOREV_CLAUDE_CODE_EA_instance_id.md K7 (dondurulmus kabul olcutu); canli probe ciktisi 2026-09-08 23:2x TSI"
+}
