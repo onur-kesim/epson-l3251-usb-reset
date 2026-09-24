@@ -101,6 +101,26 @@ def open_printer(fake=None, **kwargs) -> EpsonUsbPrinter:
     return EpsonUsbPrinter(transport=MockTransport(printer=fake), **kwargs)
 
 
+def upstream_unavailable(reason):
+    """The exception a ``setUpClass`` raises when the host program is unusable.
+
+    Seven classes need the host program (``epson_print_conf``) and skip without
+    it. That skip is misleading: ``unittest`` counts a ``SkipTest`` raised in
+    ``setUpClass`` as *one* skip for the whole class and counts none of the
+    class's tests as run, so without the host 36 of the 66 tests never run while
+    the summary still reads ``OK (skipped=7)``.
+
+    By default this returns a ``SkipTest`` (a developer without the host can
+    still run everything else). With ``EPSON_USB_REQUIRE_UPSTREAM=1`` -- which
+    CI sets -- it returns an error instead, so a missing or unusable host turns
+    the run red and a green run always means all of the tests ran.
+    """
+    if os.environ.get("EPSON_USB_REQUIRE_UPSTREAM") == "1":
+        return RuntimeError(
+            reason + " (EPSON_USB_REQUIRE_UPSTREAM=1: refusing to skip)")
+    return unittest.SkipTest(reason)
+
+
 class SessionTests(unittest.TestCase):
     """The D4 handshake and the frame grammar, against the fake printer."""
 
@@ -294,7 +314,7 @@ class UpstreamBridgeTests(unittest.TestCase):
         try:
             import epson_print_conf
         except Exception as exc:                     # pragma: no cover
-            raise unittest.SkipTest("epson_print_conf is not importable: %s" % exc)
+            raise upstream_unavailable("epson_print_conf is not importable: %s" % exc)
         cls.upstream = epson_print_conf
         config = getattr(epson_print_conf.EpsonPrinter, "PRINTER_CONFIG", {}) or {}
         cls.known = next(
@@ -303,7 +323,7 @@ class UpstreamBridgeTests(unittest.TestCase):
             None,
         )
         if cls.known is None:                        # pragma: no cover
-            raise unittest.SkipTest("upstream configures no model with a read_key")
+            raise upstream_unavailable("upstream configures no model with a read_key")
 
     def usb_printer_class(self):
         """The USB-capable ``EpsonPrinter`` subclass, built once per call."""
@@ -491,7 +511,7 @@ class APrinterThatSkipsTheLeadingNulTests(unittest.TestCase):
         try:
             import epson_print_conf
         except Exception as exc:                 # pragma: no cover
-            raise unittest.SkipTest("epson_print_conf is not importable: %s" % exc)
+            raise upstream_unavailable("epson_print_conf is not importable: %s" % exc)
         cls.host = epson_print_conf
         config = getattr(epson_print_conf.EpsonPrinter, "PRINTER_CONFIG", {}) or {}
         cls.known = next(
@@ -500,7 +520,7 @@ class APrinterThatSkipsTheLeadingNulTests(unittest.TestCase):
             None,
         )
         if cls.known is None:                    # pragma: no cover
-            raise unittest.SkipTest("upstream configures no model with a read_key")
+            raise upstream_unavailable("upstream configures no model with a read_key")
         # Constructing one touches no hardware (the test above pins that); it is
         # only needed because the check is an instance method.
         cls.printer = epson_print_conf.EpsonPrinter(model=cls.known)
@@ -799,7 +819,7 @@ class OidBridgeTests(unittest.TestCase):
         try:
             import epson_print_conf
         except Exception as exc:                 # pragma: no cover
-            raise unittest.SkipTest("epson_print_conf is not importable: %s" % exc)
+            raise upstream_unavailable("epson_print_conf is not importable: %s" % exc)
         cls.host = epson_print_conf
         config = getattr(epson_print_conf.EpsonPrinter, "PRINTER_CONFIG", {}) or {}
         cls.known = next(
@@ -808,7 +828,7 @@ class OidBridgeTests(unittest.TestCase):
             None,
         )
         if cls.known is None:                    # pragma: no cover
-            raise unittest.SkipTest("upstream configures no model with a read_key")
+            raise upstream_unavailable("upstream configures no model with a read_key")
 
     def test_parse_snmp_oid_is_the_inverse_of_snmp_oid(self):
         for command, payload in (
@@ -865,7 +885,7 @@ class TransportParityTests(unittest.TestCase):
         try:
             import epson_print_conf
         except Exception as exc:                 # pragma: no cover
-            raise unittest.SkipTest("epson_print_conf is not importable: %s" % exc)
+            raise upstream_unavailable("epson_print_conf is not importable: %s" % exc)
         cls.host = epson_print_conf
         config = getattr(epson_print_conf.EpsonPrinter, "PRINTER_CONFIG", {}) or {}
         cls.known = next(
@@ -874,7 +894,7 @@ class TransportParityTests(unittest.TestCase):
             None,
         )
         if cls.known is None:                    # pragma: no cover
-            raise unittest.SkipTest("upstream configures no model with a read_key")
+            raise upstream_unavailable("upstream configures no model with a read_key")
         # Constructing one touches no hardware (a test below pins that); it is
         # only needed here to read where the model keeps its serial number.
         cls.probe = epson_print_conf.EpsonPrinter(model=cls.known)
@@ -974,7 +994,7 @@ class WriteKeyValidationTests(unittest.TestCase):
         try:
             import epson_print_conf
         except Exception as exc:                 # pragma: no cover
-            raise unittest.SkipTest("epson_print_conf is not importable: %s" % exc)
+            raise upstream_unavailable("epson_print_conf is not importable: %s" % exc)
         cls.host = epson_print_conf
         config = getattr(epson_print_conf.EpsonPrinter, "PRINTER_CONFIG", {}) or {}
         cls.known = next(
@@ -983,7 +1003,7 @@ class WriteKeyValidationTests(unittest.TestCase):
             None,
         )
         if cls.known is None:                    # pragma: no cover
-            raise unittest.SkipTest("upstream configures no model with a read_key")
+            raise upstream_unavailable("upstream configures no model with a read_key")
 
     def printer_with_cell(self, value, restore_failures=0):
         """A printer whose cell 201 is faked, failing that many restores."""
@@ -1043,7 +1063,7 @@ class MultiCellParameterTests(unittest.TestCase):
         try:
             import epson_print_conf
         except Exception as exc:                 # pragma: no cover
-            raise unittest.SkipTest("epson_print_conf is not importable: %s" % exc)
+            raise upstream_unavailable("epson_print_conf is not importable: %s" % exc)
         cls.host = epson_print_conf
         config = getattr(epson_print_conf.EpsonPrinter, "PRINTER_CONFIG", {}) or {}
         cls.known = next(
@@ -1052,7 +1072,7 @@ class MultiCellParameterTests(unittest.TestCase):
             None,
         )
         if cls.known is None:                    # pragma: no cover
-            raise unittest.SkipTest("upstream configures no model with a read_key")
+            raise upstream_unavailable("upstream configures no model with a read_key")
 
     def printer_writing_into(self, written, fail_at=None):
         printer = self.host.EpsonPrinter(model=self.known)
@@ -1121,7 +1141,7 @@ class UsbEnvironmentWarningTests(unittest.TestCase):
         try:
             import epson_print_conf
         except Exception as exc:                 # pragma: no cover
-            raise unittest.SkipTest("epson_print_conf is not importable: %s" % exc)
+            raise upstream_unavailable("epson_print_conf is not importable: %s" % exc)
         cls.host = epson_print_conf
 
     def warning(self, platform, available):
