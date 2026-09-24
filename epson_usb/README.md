@@ -1,6 +1,60 @@
+Not affiliated with Seiko Epson.
+
 # epson_usb
 
 USB (IEEE 1284.4 / D4) access to Epson printers.
+
+```console
+pip install epson-usb
+```
+
+The distribution is called `epson-usb`; the import name is `epson_usb`.
+
+**Status.** This package is a demonstration of what has been measured, not a
+supported product. No maintenance is promised: patches are welcome, but fixes for
+models the maintainer cannot reproduce are not, and no dates are given (in the
+maintainer's own words on the tracker: "for those I can take patches but cannot
+promise fixes, and I would rather not put a date on it",
+[#35](https://github.com/Ircama/epson_print_conf/issues/35#issuecomment-5798831443)).
+
+## What has been measured on real hardware
+
+Each row is one physical unit. "Standalone tool" means
+[`epson_l3251_usb_reset.py`](https://github.com/onur-kesim/epson-l3251-usb-reset),
+the program this library was extracted from, **not** the code in this package.
+
+| # | Printer | OS | Who | Code that ran | What was observed | Source |
+|---|---|---|---|---|---|---|
+| 1 | L3251 | Windows | Onur Kesim | standalone tool | D4 session with the credit handshake over the Windows `USBPRINT` interface, no driver replacement. EEPROM reads and writes are answered on the secondary USB interface (`MI_01` on this unit). Full 256-cell bank-0 backup; counter reset with read-back verification. | [#35, 28 Aug 2026](https://github.com/Ircama/epson_print_conf/issues/35#issuecomment-5452048045) |
+| 2 | L3251 | Windows | Onur Kesim | standalone tool | The waste counter is little-endian. What settled it was the printer's own error state: `0xCC 0x18` reads 6348 (100.0 %) little-endian and the printer was in the error state; `0x3B 0x18` reads 6203 (97.7 %) and it was not. | [#35, 4 Sep 2026](https://github.com/Ircama/epson_print_conf/issues/35#issuecomment-5538152419) |
+| 3 | L3251 | Windows | Onur Kesim | standalone tool | The main waste counter is mirrored in three cells. After ten bordered photo pages, `0x30/0x31`, `0x34/0x35` and `0xC0/0xC1` each went 0 → 17 (`0xFC/0xFD` stayed 0). After zeroing the full set, all three stayed at 0 across two power cycles. | [#35, 4 Sep 2026](https://github.com/Ircama/epson_print_conf/issues/35#issuecomment-5538152419) |
+| 4 | L3250 (firmware XF26P8, USB ID 04B8:118A) | Linux | endafk | `epson_usb` from `epson_print_conf` v8.0.0 | Printer at 100 % (`0x30/0x31` = 6346, status error `0x10`). Reset over USB by writing the 14-cell ET-2810 `raw_waste_reset` set (not `0xC0/0xC1`). After a power cycle everything stayed at 0, and `0xC0/0xC1` went to 0 by itself, as on the L3251. The maintainer of `epson_print_conf` replied: "it looks like the reset works as expected." | [#35, 24 Sep 2026](https://github.com/Ircama/epson_print_conf/issues/35#issuecomment-5810314920), [reply](https://github.com/Ircama/epson_print_conf/issues/35#issuecomment-5810422246) |
+
+Row 4 ran the library code of v8.0.0. The code in this package is identical to it
+apart from docstrings and comments (the parsed syntax trees of the five changed
+library modules are equal once docstrings are removed; compared on 24 Sep 2026);
+the tests are newer.
+
+## What has not been measured
+
+| What | Status |
+|---|---|
+| This release (`epson-usb` 0.1.0) against a real printer | No record of it. Rows 1-3 used the standalone tool; row 4 used the earlier code described above. That this library behaves like the standalone tool is checked by hardware-free tests (`tests/test_fidelity.py`, against a frozen copy of the tool), not by a hardware run. |
+| Printer models other than the two units above | Not measured. One unit of each; the L3251's firmware version was not recorded. |
+| Firmware versions other than XF26P8 (L3250) | Not measured. |
+| macOS | No backend measured. |
+| Windows: the `libusb`, `pyusb` and `raw` backends | Not measured. Only the native `usbprint` route was used (rows 1-3, by the standalone tool). |
+| Linux: which backend row 4 used | Not reported. `libusb`, `pyusb` and `raw` were not measured individually. |
+| The `rw` service command over USB | Not measured. |
+| Persistence beyond the power cycles listed | Not measured (two on the L3251, one on the L3250). |
+| The test suite (no hardware) on platforms other than Linux / Python 3.10 (CI) and Windows / Python 3.14 (maintainer's machine, 24 Sep 2026) | Not run. |
+
+The sections below were written for the copy of this package that lives inside
+[`epson_print_conf`](https://github.com/Ircama/epson_print_conf). Where they
+mention `epson_print_conf.py`, `ui.py`, `find_printers.py` or "the repository
+root", they mean that project; those files are not part of this distribution.
+The backends are described as that project describes them: only the rows above
+were measured by the people named in them.
 
 ## Platforms and backends
 
@@ -261,6 +315,7 @@ Environment variables, for the cases where a flag is inconvenient:
 | `EPSON_USB_LIBUSB` | path of the `libusb-1.0` shared library, if discovery fails (needed on Windows only for the `libusb`/`pyusb` fallbacks) |
 | `EPSON_USB_RAW_DEVICE` | extra character device for the `raw` backend |
 | `EPSON_INSTANCE_ID` | Windows device instance id, for the `usbprint` backend |
+| `EPSON_USB_REQUIRE_UPSTREAM` | tests only: `1` turns the skipped host-program test classes into errors (see *Tests*) |
 
 Permissions and packages:
 
@@ -295,6 +350,13 @@ Everything runs without hardware:
 python -m unittest discover -s epson_usb/tests -t .
 python epson_usb/tests/mutant_run.py     # proves the suite would catch a porting mistake
 ```
+
+Seven test classes need the host program, `epson_print_conf`. Without it they are
+skipped, and `unittest` summarises that as `Ran 30 tests ... OK (skipped=7)` even
+though 36 of the 66 tests never ran (it counts one skip per class and none of the
+tests inside). Set `EPSON_USB_REQUIRE_UPSTREAM=1` and that skip becomes an error, so
+a green run always means all 66 ran. CI does this; because `epson_print_conf` is not
+on PyPI, CI checks it out at a pinned commit and puts it on `PYTHONPATH`.
 
 They all rest on the `mock` backend: an in-memory printer that consumes the same
 bytes a real one receives and produces the same framing back, so the protocol
