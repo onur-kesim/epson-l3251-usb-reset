@@ -1,0 +1,63 @@
+name: release
+
+# Publishes `epson-usb` to PyPI with Trusted Publishing (OIDC): no API token is
+# stored anywhere.
+#
+# Trigger: ONLY when a GitHub release is published - never on push.
+#
+# One-time setup on PyPI (a "pending publisher"), done by the repository owner:
+#   owner: onur-kesim   repository: epson-l3251-usb-reset
+#   workflow: release.yml   environment: pypi
+# These names must match exactly, or the publish is refused.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # This repository also carries releases of the standalone tool (tags v0.x).
+    # Only a release whose tag starts with "epson-usb-v" builds the package, so
+    # publishing a release of the tool can never publish (or re-publish) this one.
+    if: startsWith(github.event.release.tag_name, 'epson-usb-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+
+      - name: The release tag must match the package version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(python -c "import re; print(re.search(r'__version__ = \"([^\"]+)\"', open('epson_usb/__version__.py').read()).group(1))")
+          echo "package version: $version   release tag: $TAG"
+          test "$TAG" = "epson-usb-v$version"
+
+      - name: Build the sdist and the wheel
+        run: |
+          python -m pip install build
+          python -m build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write     # the OIDC token PyPI exchanges for a short-lived upload token
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
