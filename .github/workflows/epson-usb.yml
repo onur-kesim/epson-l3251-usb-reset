@@ -34,15 +34,11 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Check out epson_print_conf at the pinned commit
-        uses: actions/checkout@v7
-        with:
-          repository: Ircama/epson_print_conf
-          ref: ${{ env.UPSTREAM_SHA }}
-          path: upstream
-
-      - name: Install the host program's requirements
-        run: python -m pip install -r upstream/requirements.txt
+      # K2 MUTANT (throw-away branch, never merged): the host program
+      # `epson_print_conf` was REMOVED from the test dependencies - the checkout
+      # and requirements steps that used to be here are gone. With
+      # EPSON_USB_REQUIRE_UPSTREAM=1 the seven test classes that need it must
+      # now ERROR instead of being skipped, so this run must be RED (KRITER.md K2).
 
       - name: The package under test is THIS repository's, not the host's copy
         env:
