@@ -27,15 +27,15 @@ jobs:
       run:
         shell: bash     # -eo pipefail, so `cmd | tee log` fails when cmd fails
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 3.10 is the version the suite was measured on (Ran 66, OK).
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.10"
 
       - name: Check out epson_print_conf at the pinned commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Ircama/epson_print_conf
           ref: ${{ env.UPSTREAM_SHA }}
