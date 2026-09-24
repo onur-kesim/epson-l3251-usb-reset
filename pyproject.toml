@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "epson-usb"
+dynamic = ["version"]
+description = "USB (IEEE 1284.4 / D4) access to Epson printers: D4 session, EPSON-CTRL frames, EEPROM, status. Not affiliated with Seiko Epson."
+readme = "epson_usb/README.md"
+# 3.10 is the lowest Python the test suite has been run on (24 Sep 2026).
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["epson_usb/LICENSE"]
+authors = [
+    { name = "Onur Kesim" },
+    { name = "Ircama" },
+]
+keywords = ["epson", "usb", "d4", "ieee-1284.4", "eeprom", "printer"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Hardware :: Universal Serial Bus (USB) :: Printer",
+]
+# Runtime dependency. The host program `epson_print_conf` is deliberately NOT
+# listed: it is not on PyPI (404, measured 24 Sep 2026) and PyPI rejects direct
+# URL dependencies. It is only needed to run seven of the test classes; CI
+# installs it separately at a pinned commit (see .github/workflows/epson-usb.yml).
+dependencies = ["pyusb"]
+
+[project.urls]
+Homepage = "https://github.com/onur-kesim/epson-l3251-usb-reset"
+Issues = "https://github.com/onur-kesim/epson-l3251-usb-reset/issues"
+
+[tool.setuptools.dynamic]
+# epson_usb/__version__.py is the single source of truth; it is parsed, not
+# imported, so building does not need the package's dependencies.
+version = { attr = "epson_usb.__version__.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["epson_usb", "epson_usb.*"]
+# Real packages only (those with an __init__.py): epson_usb/examples/ is a
+# demo script, not part of the library.
+namespaces = false
+# The tests (and the frozen reference copy of the standalone tool under
+# tests/referans/) are not part of the distribution.
+exclude = ["epson_usb.tests", "epson_usb.tests.*"]
