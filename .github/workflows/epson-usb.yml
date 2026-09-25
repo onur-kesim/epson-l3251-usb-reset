@@ -1,9 +1,11 @@
 name: epson-usb
 
-# Acceptance criteria K1-K4: see KRITER.md (frozen before any code).
+# Acceptance criteria K1-K4: see KRITER.md; K5-K6: see KRITER_0.1.1.md (both
+# frozen before any code).
 #
 # Runs on EVERY push on EVERY branch (no branch filter), so the throw-away
-# branch `mutant/k2-upstream-skip` gets a run too, and on pull requests.
+# branches `mutant/k2-upstream-skip` and `mutant/k5-pyusb-mandatory` get a run
+# too, and on pull requests.
 on:
   push:
   pull_request:
@@ -21,18 +23,26 @@ env:
 
 jobs:
   epson-usb:
+    name: epson-usb (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      # Both versions always run to the end: a red 3.9 must not hide 3.10.
+      fail-fast: false
+      matrix:
+        # K6: 3.9 is the lowest version the package declares, so it is the one
+        # that has to be green. It is NOT allowed to be skipped: if the host
+        # program cannot be installed on 3.9, the 3.9 job is red and K6 has failed.
+        python-version: ["3.9", "3.10"]
     defaults:
       run:
         shell: bash     # -eo pipefail, so `cmd | tee log` fails when cmd fails
     steps:
       - uses: actions/checkout@v7
 
-      # 3.10 is the version the suite was measured on (Ran 66, OK).
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
 
       - name: Check out epson_print_conf at the pinned commit
         uses: actions/checkout@v7
@@ -120,4 +130,66 @@ jobs:
           assert "site-packages" in epson_usb.__file__, "not imported from the installed wheel"
           assert licence == "MIT", "licence metadata is %r, expected 'MIT'" % licence
           print("K4: import works, licence MIT")
+          PY
+
+      # K5: PyUSB is an optional extra in the wheel's metadata, and in practice.
+      # `pip install epson-usb` must not install it, `pip install
+      # "epson-usb[pyusb]"` must. The evidence that this gate can go red is the
+      # run on branch `mutant/k5-pyusb-mandatory` (`dependencies = ["pyusb"]`
+      # put back).
+      - name: K5 - PyUSB only through the [pyusb] extra
+        run: |
+          wheel=$(realpath dist/*.whl)
+          python - "$wheel" <<'PY'
+          import email, re, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              name = [n for n in z.namelist() if n.endswith(".dist-info/METADATA")][0]
+              meta = email.message_from_string(z.read(name).decode("utf-8"))
+          requires = meta.get_all("Requires-Dist") or []
+          print("Requires-Dist: ", requires)
+          print("Provides-Extra:", meta.get_all("Provides-Extra"))
+          pyusb = [r for r in requires if re.match(r"pyusb\b", r, re.I)]
+          assert pyusb, "no Requires-Dist for pyusb: the [pyusb] extra would install nothing"
+          for r in pyusb:
+              assert re.search(r'''extra\s*==\s*["']pyusb["']''', r), "PyUSB is required without the extra: " + r
+          assert "pyusb" in (meta.get_all("Provides-Extra") or []), "no Provides-Extra: pyusb"
+          print("K5 metadata: Requires-Dist pyusb only under extra == pyusb")
+          PY
+
+          # Without the extra: PyUSB is not installed and the import works.
+          python -m venv "$RUNNER_TEMP/k5-plain"
+          "$RUNNER_TEMP/k5-plain/bin/pip" install "$wheel"
+          if "$RUNNER_TEMP/k5-plain/bin/pip" show pyusb > /dev/null 2>&1; then
+            echo "K5 FAILED: 'pip install epson-usb' installed PyUSB"; exit 1
+          fi
+          cd "$RUNNER_TEMP"    # leave the checkout so the source tree cannot shadow the wheel
+          "$RUNNER_TEMP/k5-plain/bin/python" - <<'PY'
+          import importlib.util
+          import epson_usb
+          assert "site-packages" in epson_usb.__file__, "not imported from the installed wheel"
+          assert importlib.util.find_spec("usb") is None, "PyUSB (import name 'usb') is importable"
+          print("K5 plain install: epson_usb imports, PyUSB absent")
+          PY
+
+          # With the extra: PyUSB is installed.
+          python -m venv "$RUNNER_TEMP/k5-extra"
+          "$RUNNER_TEMP/k5-extra/bin/pip" install "${wheel}[pyusb]"
+          "$RUNNER_TEMP/k5-extra/bin/python" - <<'PY'
+          import importlib.metadata as md
+          import epson_usb, usb
+          print("epson_usb", epson_usb.__version__, "+ pyusb", md.version("pyusb"))
+          print("K5 extra install: PyUSB present")
+          PY
+
+      # K6: the declared floor is 3.9. This job (3.9) passing K1 and K3 above is
+      # the other half; here the wheel's own metadata is checked.
+      - name: K6 - the wheel says Requires-Python >=3.9
+        run: |
+          python - "$(realpath dist/*.whl)" <<'PY'
+          import email, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              name = [n for n in z.namelist() if n.endswith(".dist-info/METADATA")][0]
+              meta = email.message_from_string(z.read(name).decode("utf-8"))
+          assert meta["Requires-Python"] == ">=3.9", "Requires-Python is %r" % meta["Requires-Python"]
+          print("K6: Requires-Python", meta["Requires-Python"])
           PY
