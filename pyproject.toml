@@ -36,7 +36,11 @@ classifiers = [
 # not on PyPI (404, measured 24 Sep 2026) and PyPI rejects direct URL
 # dependencies. It is only needed to run seven of the test classes; CI installs
 # it separately at a pinned commit (see .github/workflows/epson-usb.yml).
-dependencies = []
+# K5 MUTANT (throw-away branch, never merged): the 0.1.0 defect is put back -
+# PyUSB is a mandatory dependency again. The wheel then carries an
+# unconditional `Requires-Dist: pyusb` and `pip install epson-usb` installs
+# it, so the K5 step of the epson-usb workflow must be RED (KRITER_0.1.1.md K5).
+dependencies = ["pyusb"]
 
 [project.optional-dependencies]
 pyusb = ["pyusb>=1.2"]
