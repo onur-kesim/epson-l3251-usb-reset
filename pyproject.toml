@@ -7,8 +7,11 @@ name = "epson-usb"
 dynamic = ["version"]
 description = "USB (IEEE 1284.4 / D4) access to Epson printers: D4 session, EPSON-CTRL frames, EEPROM, status. Not affiliated with Seiko Epson."
 readme = "epson_usb/README.md"
-# 3.10 is the lowest Python the test suite has been run on (24 Sep 2026).
-requires-python = ">=3.10"
+# 3.9 is the lowest Python the test suite is run on (CI job "3.9", K6 in
+# KRITER_0.1.1.md). The code was never 3.10-only: 0.1.0 declared >=3.10 because
+# that was the lowest version the suite had been run on, not because anything
+# needs it (reported on epson_print_conf #35, issuecomment-5822154925).
+requires-python = ">=3.9"
 license = "MIT"
 license-files = ["epson_usb/LICENSE"]
 authors = [
@@ -20,13 +23,23 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
     "Topic :: System :: Hardware :: Universal Serial Bus (USB) :: Printer",
 ]
-# Runtime dependency. The host program `epson_print_conf` is deliberately NOT
-# listed: it is not on PyPI (404, measured 24 Sep 2026) and PyPI rejects direct
-# URL dependencies. It is only needed to run seven of the test classes; CI
-# installs it separately at a pinned commit (see .github/workflows/epson-usb.yml).
-dependencies = ["pyusb"]
+# No runtime dependencies: the built-in `usbprint` (Windows), `libusb` (ctypes)
+# and `raw` backends need nothing from PyPI. PyUSB is optional and only exists
+# as the extra below (K5 in KRITER_0.1.1.md); the code and docstrings always
+# described it that way, the 0.1.0 metadata did not.
+#
+# The host program `epson_print_conf` is deliberately NOT listed either: it is
+# not on PyPI (404, measured 24 Sep 2026) and PyPI rejects direct URL
+# dependencies. It is only needed to run seven of the test classes; CI installs
+# it separately at a pinned commit (see .github/workflows/epson-usb.yml).
+dependencies = []
+
+[project.optional-dependencies]
+pyusb = ["pyusb>=1.2"]
 
 [project.urls]
 Homepage = "https://github.com/onur-kesim/epson-l3251-usb-reset"
