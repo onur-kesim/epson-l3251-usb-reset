@@ -29,6 +29,7 @@ the program this library was extracted from, **not** the code in this package.
 | 2 | L3251 | Windows | Onur Kesim | standalone tool | The waste counter is little-endian. What settled it was the printer's own error state: `0xCC 0x18` reads 6348 (100.0 %) little-endian and the printer was in the error state; `0x3B 0x18` reads 6203 (97.7 %) and it was not. | [#35, 4 Sep 2026](https://github.com/Ircama/epson_print_conf/issues/35#issuecomment-5538152419) |
 | 3 | L3251 | Windows | Onur Kesim | standalone tool | The main waste counter is mirrored in three cells. After ten bordered photo pages, `0x30/0x31`, `0x34/0x35` and `0xC0/0xC1` each went 0 → 17 (`0xFC/0xFD` stayed 0). After zeroing the full set, all three stayed at 0 across two power cycles. | [#35, 4 Sep 2026](https://github.com/Ircama/epson_print_conf/issues/35#issuecomment-5538152419) |
 | 4 | L3250 (firmware XF26P8, USB ID 04B8:118A) | Linux | endafk | `epson_usb` from `epson_print_conf` v8.0.0 | Printer at 100 % (`0x30/0x31` = 6346, status error `0x10`). Reset over USB by writing the 14-cell ET-2810 `raw_waste_reset` set (not `0xC0/0xC1`). After a power cycle everything stayed at 0, and `0xC0/0xC1` went to 0 by itself, as on the L3251. The maintainer of `epson_print_conf` replied: "it looks like the reset works as expected." | [#35, 24 Sep 2026](https://github.com/Ircama/epson_print_conf/issues/35#issuecomment-5810314920), [reply](https://github.com/Ircama/epson_print_conf/issues/35#issuecomment-5810422246) |
+| 5 | XP-205 | Not reported | Ircama | `epson-usb` 0.1.0 from PyPI, on Python 3.9.13 (installed with `--ignore-requires-python`) | The report reads: "I successfully installed 0.1.0 on Python 3.9.13 with `--ignore-requires-python` and used it to drive an XP-205 over USB." Nothing more was reported: no OS, no backend, no operations, no firmware. | [#35, 24 Sep 2026](https://github.com/Ircama/epson_print_conf/issues/35#issuecomment-5822154925) |
 
 Row 4 ran the library code of v8.0.0. The code in this package is identical to it
 apart from docstrings and comments (the parsed syntax trees of the five changed
@@ -39,15 +40,15 @@ the tests are newer.
 
 | What | Status |
 |---|---|
-| This release (`epson-usb` 0.1.0) against a real printer | No record of it. Rows 1-3 used the standalone tool; row 4 used the earlier code described above. That this library behaves like the standalone tool is checked by hardware-free tests (`tests/test_fidelity.py`, against a frozen copy of the tool), not by a hardware run. |
-| Printer models other than the two units above | Not measured. One unit of each; the L3251's firmware version was not recorded. |
+| This release (`epson-usb` 0.1.1) against a real printer | No record of it. Row 5 is a report on 0.1.0, whose library modules 0.1.1 does not change (the version number, the packaging metadata and this file are what differ), but it says no more than the sentence quoted there. Rows 1-3 used the standalone tool; row 4 used the earlier code described above. That this library behaves like the standalone tool is checked by hardware-free tests (`tests/test_fidelity.py`, against a frozen copy of the tool), not by a hardware run. |
+| Printer models other than the L3251, L3250 and XP-205 units above | Not measured. One unit of each; the L3251's firmware version was not recorded, and for the XP-205 only the sentence quoted in row 5 exists. |
 | Firmware versions other than XF26P8 (L3250) | Not measured. |
 | macOS | No backend measured. |
 | Windows: the `libusb`, `pyusb` and `raw` backends | Not measured. Only the native `usbprint` route was used (rows 1-3, by the standalone tool). |
 | Linux: which backend row 4 used | Not reported. `libusb`, `pyusb` and `raw` were not measured individually. |
 | The `rw` service command over USB | Not measured. |
 | Persistence beyond the power cycles listed | Not measured (two on the L3251, one on the L3250). |
-| The test suite (no hardware) on platforms other than Linux / Python 3.10 (CI) and Windows / Python 3.14 (maintainer's machine, 24 Sep 2026) | Not run. |
+| The test suite (no hardware) on platforms other than Linux / Python 3.9 and 3.10 (CI) and Windows / Python 3.14 (maintainer's machine, 24 Sep 2026) | Not run. |
 
 The sections below were written for the copy of this package that lives inside
 [`epson_print_conf`](https://github.com/Ircama/epson_print_conf). Where they
@@ -65,7 +66,7 @@ the right one is chosen per platform, so the common case needs no options.
 |---|---|---|
 | `usbprint` | Windows `USBPRINT` device interface, `ctypes` over SetupAPI + kernel32 — **no driver change** (no Zadig, no WinUSB) | Windows (tried first) |
 | `libusb` | `libusb-1.0` through the package's own `ctypes` binding (no PyUSB needed) | Linux, macOS (on Windows: fallback, see below) |
-| `pyusb` | PyUSB, if you prefer it (`pip install pyusb`) | Linux, macOS (on Windows: fallback) |
+| `pyusb` | PyUSB, if you prefer it (`pip install "epson-usb[pyusb]"`) | Linux, macOS (on Windows: fallback) |
 | `raw` | a POSIX character device (`/dev/usb/lp0`) | Linux, macOS |
 | `mock` | the in-memory fake printer | everywhere (tests, demos) |
 
