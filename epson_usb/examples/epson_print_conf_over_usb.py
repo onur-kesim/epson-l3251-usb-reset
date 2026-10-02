@@ -13,6 +13,7 @@ Read-only unless you pass ``--reset`` or ``--temp-reset``.
     python examples/epson_print_conf_over_usb.py --model L3251
     python examples/epson_print_conf_over_usb.py --temp-reset      # WRITES (temporary)
     python examples/epson_print_conf_over_usb.py --reset-full      # WRITES the cell set
+    python examples/epson_print_conf_over_usb.py --interface 1     # only USB interface 1
 
 Requirements: this package, plus ``epson_print_conf`` and its dependencies
 (``pysnmp``, ``pysnmp-sync-adapter``, ``pyyaml``, ``pyprintlpr``,
@@ -27,7 +28,7 @@ import sys
 from epson_usb.compat import load_epson_print_conf, patch_epson_print_conf
 
 
-def build_printer(model_name, dry_run, backend=None, device=None):
+def build_printer(model_name, dry_run, backend=None, device=None, interface=None):
     """Return a USB-capable ``EpsonPrinter`` subclass instance.
 
     ``epson_print_conf`` is imported here rather than at module import time, so
@@ -38,12 +39,28 @@ def build_printer(model_name, dry_run, backend=None, device=None):
     # taken from its configuration for the model in use. No model tables are
     # involved, which is exactly why the library can be hosted here.
     usb_epson_printer = patch_epson_print_conf(upstream)
+    # `interface` is a transport option: it travels through `usb_options` to
+    # the backend (libusb / pyusb), which then claims that interface and no
+    # other. Without it the backend chooses, and libusb falls back to the next
+    # candidate when D4 does not answer.
     return usb_epson_printer(
         model=model_name,
         backend=backend,
         device=device,
         dry_run=dry_run,
+        usb_options={"interface": interface} if interface is not None else None,
     )
+
+
+def interface_number(text):
+    """``argparse`` type for ``--interface``: a USB interface number, 0-255."""
+    try:
+        number = int(text, 0)
+    except ValueError:
+        raise argparse.ArgumentTypeError("%r is not a number" % text)
+    if not 0 <= number <= 255:
+        raise argparse.ArgumentTypeError("%d is not a USB interface number (0-255)" % number)
+    return number
 
 
 def main(argv=None):
@@ -53,6 +70,11 @@ def main(argv=None):
     parser.add_argument("--backend", default=None,
                         help="usbprint | libusb | pyusb | raw | mock")
     parser.add_argument("--device", default=None, help="explicit device path")
+    parser.add_argument("--interface", type=interface_number, default=None, metavar="N",
+                        help="USB interface number to use (libusb and pyusb backends). "
+                             "Only that interface is tried: the automatic choice and the "
+                             "fallback to the next candidate when D4 does not answer are "
+                             "both off. Without it the library chooses (and falls back).")
     parser.add_argument("--dry-run", action="store_true",
                         help="never write, whatever else is asked for")
     parser.add_argument("--temp-reset", action="store_true",
@@ -66,10 +88,21 @@ def main(argv=None):
                         help="print only the waste ink levels")
     args = parser.parse_args(argv)
 
+    if args.interface is not None:
+        if args.backend in ("usbprint", "raw", "mock"):
+            parser.error("--interface needs the libusb or pyusb backend: %s has no "
+                         "interface to choose" % args.backend)
+        if args.backend is None:
+            # usbprint (tried first on Windows) and raw cannot pick an
+            # interface, so asking for one means asking for libusb.
+            args.backend = "libusb"
+            print("note: --interface given without --backend: using libusb")
+
     if args.backend == "mock":
         print("note: using the in-memory fake printer (no hardware involved)")
 
-    printer = build_printer(args.model, args.dry_run, args.backend, args.device)
+    printer = build_printer(args.model, args.dry_run, args.backend, args.device,
+                            args.interface)
     try:
         print("transport:", printer.usb_describe())
         if not printer.parm:
