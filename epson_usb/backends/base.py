@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import List, Optional, Tuple
 
 __all__ = ["DeviceInfo", "Transport"]
 
@@ -74,6 +74,9 @@ class Transport(abc.ABC):
     def __init__(self) -> None:
         self._info = DeviceInfo(backend=self.name, path="")
         self._opened = False
+        #: ``(interface number, reason)`` of every candidate that
+        #: :meth:`next_candidate` could not even claim and therefore skipped.
+        self.skipped_candidates: List[Tuple[Optional[int], str]] = []
 
     # -- lifecycle ---------------------------------------------------------
     @property
@@ -92,6 +95,23 @@ class Transport(abc.ABC):
     def close(self) -> None:
         """Release the device. Must never raise."""
         self._opened = False
+
+    def next_candidate(self) -> bool:
+        """Switch to the next candidate pipe; ``False`` when there is none.
+
+        Some devices expose more than one interface that *could* carry D4, and
+        which one answers cannot be told from the descriptors. The opening
+        path (:class:`~epson_usb.printer.EpsonUsbPrinter`) runs the D4
+        handshake, and when it gets no answer it asks the transport for the
+        next candidate and tries again. The transport stays dumb: it only
+        claims a different pipe, it knows nothing about D4.
+
+        Called after the failed session was closed. A ``True`` answer means
+        the transport is open again, on another candidate, and
+        :attr:`info` says which. A transport with a single possible pipe -- the
+        default -- has nothing to switch to.
+        """
+        return False
 
     def __enter__(self) -> "Transport":
         self.open()

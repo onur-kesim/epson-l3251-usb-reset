@@ -20,12 +20,25 @@ driver to let go of it first:
   IOKit layer, and the parent kernel driver is detached automatically where
   the library supports it.
 
-Only the *vendor-specific* interface answers D4 (``bInterfaceClass == 0xFF``).
-For the L3250 that was interface 2: a report on ``epson_print_conf`` issue #35
-found interfaces 0 and 1 could not be claimed while interface 2 could, and the
-Epson driver kept working. :func:`select_interface_and_endpoints` encodes that
-preference and is a pure function, so it is unit-tested with synthetic
-descriptors rather than needing hardware.
+D4 is *usually* answered on a vendor-specific interface
+(``bInterfaceClass == 0xFF``). For the L3250 that was interface 2: a report on
+``epson_print_conf`` issue #35 found interfaces 0 and 1 could not be claimed
+while interface 2 could, and the Epson driver kept working. A later report on
+the same issue (an L3251 that identifies as "L3250 Series", 1 Oct 2026) shows
+that "vendor-specific first" is a preference and not a rule: that unit exposes
+interface 0 (class 0xFF, subclass 0xFF, protocol 0xFF), interface 1 (printer
+class) and interface 2 (class 0xFF, subclass 0xAA), the first of them never
+answered D4, and interface 1 did.
+
+So the choice is a *list*, not a single value:
+:func:`candidate_interfaces` returns every interface that has a bulk IN and a
+bulk OUT endpoint, best first (vendor-specific ones, then the others, lowest
+number first within each group), and :meth:`LibusbTransport.next_candidate`
+moves to the next one when the D4 handshake on the current one fails -- the
+handshake itself runs one layer up, in :class:`epson_usb.printer.EpsonUsbPrinter`.
+:func:`select_interface_and_endpoints` is still there and still returns the
+first candidate only. All of this is pure functions over descriptors, so it is
+unit-tested with synthetic descriptors rather than needing hardware.
 
 Install the shared library with:
 
@@ -62,6 +75,8 @@ __all__ = [
     "InterfaceDescriptor",
     "EndpointDescriptor",
     "select_interface_and_endpoints",
+    "candidate_interfaces",
+    "resolve_candidates",
     "libusb_library_path",
     "libusb_available",
 ]
@@ -237,21 +252,27 @@ class InterfaceDescriptor:
         return None
 
 
-def select_interface_and_endpoints(
-    interfaces: Sequence[InterfaceDescriptor],
-) -> Optional[Tuple[InterfaceDescriptor, EndpointDescriptor, EndpointDescriptor]]:
-    """Pick the interface that can carry D4, and its two bulk endpoints.
+#: One candidate: an interface and its two bulk endpoints (IN, OUT).
+Candidate = Tuple[InterfaceDescriptor, EndpointDescriptor, EndpointDescriptor]
 
-    Preference order (documented, and covered by tests with synthetic
-    descriptors):
 
-    1. vendor-specific interfaces (class 0xFF) that have both a bulk IN and a
-       bulk OUT endpoint -- the D4 control channel lives there;
-    2. any other interface with both bulk endpoints, lowest number first;
-    3. nothing usable -> ``None``.
+def candidate_interfaces(interfaces: Sequence[InterfaceDescriptor]) -> List[Candidate]:
+    """Every interface that can carry a byte pipe, best first.
 
-    Among equals the lowest interface number wins, so the choice is stable
-    across runs.
+    An interface is a candidate when it has both a bulk IN and a bulk OUT
+    endpoint and is the default (alternate 0) setting -- alternate settings
+    are only entered on request. Order (documented, and covered by tests with
+    synthetic descriptors):
+
+    1. vendor-specific interfaces (class 0xFF), lowest number first -- the D4
+       control channel is usually there;
+    2. all the others, lowest number first.
+
+    The order is stable across runs. It is a *preference*: the opening path
+    walks the list when the D4 handshake does not answer on an interface (a
+    field report has D4 answering on interface 1, a printer-class interface,
+    while interface 0, vendor-specific, stayed silent). An empty list means
+    nothing usable.
     """
     usable = []
     for interface in interfaces:
@@ -260,13 +281,75 @@ def select_interface_and_endpoints(
             continue
         if interface.alternate != 0:
             continue  # alternate settings are only entered on request
-        usable.append((0 if interface.is_vendor_specific else 1, interface.number, interface,
-                       bulk_in, bulk_out))
-    if not usable:
-        return None
+        rank = 0 if interface.is_vendor_specific else 1
+        usable.append((rank, interface.number, interface, bulk_in, bulk_out))
     usable.sort(key=lambda item: (item[0], item[1]))
-    _, _, interface, bulk_in, bulk_out = usable[0]
-    return interface, bulk_in, bulk_out
+    return [(interface, bulk_in, bulk_out) for _, _, interface, bulk_in, bulk_out in usable]
+
+
+def select_interface_and_endpoints(
+    interfaces: Sequence[InterfaceDescriptor],
+) -> Optional[Candidate]:
+    """Pick the *first* candidate: the interface to try first, and its bulk endpoints.
+
+    The single-value form of :func:`candidate_interfaces` (``None`` when that
+    list is empty), unchanged in behaviour: vendor-specific interfaces with
+    both bulk endpoints first, then any other interface with both, lowest
+    number first among equals. Callers that can recover from a silent
+    interface should use :func:`candidate_interfaces` instead.
+    """
+    candidates = candidate_interfaces(interfaces)
+    return candidates[0] if candidates else None
+
+
+def resolve_candidates(
+    interfaces: Sequence[InterfaceDescriptor],
+    interface: Optional[int] = None,
+    endpoint_in: Optional[int] = None,
+    endpoint_out: Optional[int] = None,
+    where: str = "device",
+) -> List[Candidate]:
+    """The candidates to try, honouring an explicit interface choice.
+
+    Without ``interface`` this is :func:`candidate_interfaces`. With
+    ``interface`` the list has exactly **one** entry -- the interface the
+    caller named, whatever its class -- so there is nothing to fall back to:
+    an explicit choice turns the automatic choice and the fallback off.
+    ``endpoint_in``/``endpoint_out`` pin the endpoint addresses within it.
+
+    ``where`` only words the error messages (``"device 1:4"``).
+    """
+    if interface is None:
+        candidates = candidate_interfaces(interfaces)
+        if not candidates:
+            raise DeviceNotFoundError("%s exposes no interface with bulk endpoints" % where)
+        return candidates
+    chosen = next((i for i in interfaces if i.number == interface), None)
+    if chosen is None:
+        raise DeviceNotFoundError("%s has no interface %d" % (where, interface))
+    bulk_in = next(
+        (
+            endpoint
+            for endpoint in chosen.endpoints
+            if endpoint.is_bulk and endpoint.is_in
+            and (endpoint_in is None or endpoint.address == endpoint_in)
+        ),
+        None,
+    )
+    bulk_out = next(
+        (
+            endpoint
+            for endpoint in chosen.endpoints
+            if endpoint.is_bulk and not endpoint.is_in
+            and (endpoint_out is None or endpoint.address == endpoint_out)
+        ),
+        None,
+    )
+    if bulk_in is None or bulk_out is None:
+        raise DeviceNotFoundError(
+            "%s interface %d has no usable bulk endpoints" % (where, chosen.number)
+        )
+    return [(chosen, bulk_in, bulk_out)]
 
 
 # --------------------------------------------------------------------------- #
@@ -600,6 +683,10 @@ class LibusbTransport(Transport):
         self._detached = False
         self._bulk_in = None
         self._bulk_out = None
+        #: Interface numbers of the candidates, best first, as seen by the
+        #: last enumeration; and which of them :meth:`open` takes next.
+        self._candidates: List[int] = []
+        self._candidate_index = 0
 
     # -- discovery ---------------------------------------------------------
     @classmethod
@@ -614,10 +701,10 @@ class LibusbTransport(Transport):
     def find(cls, vendor_id: Optional[int] = EPSON_VID, **_kwargs) -> List[DeviceInfo]:
         out = []
         for record in _enumerate(vendor_id):
-            selected = select_interface_and_endpoints(record["interfaces"])
+            candidates = candidate_interfaces(record["interfaces"])
             interface_number = endpoint_in = endpoint_out = None
-            if selected:
-                selected_interface, bulk_in, bulk_out = selected
+            if candidates:
+                selected_interface, bulk_in, bulk_out = candidates[0]
                 interface_number = selected_interface.number
                 endpoint_in = bulk_in.address
                 endpoint_out = bulk_out.address
@@ -636,6 +723,9 @@ class LibusbTransport(Transport):
                         "bus": record["bus"],
                         "address": record["address"],
                         "configuration_value": record["configuration_value"],
+                        # Interface numbers in the order the opening path will
+                        # try them; ``DeviceInfo.interface`` is the first.
+                        "candidate_interfaces": [c[0].number for c in candidates],
                         "interfaces": [
                             {
                                 "number": i.number,
@@ -707,48 +797,20 @@ class LibusbTransport(Transport):
             finally:
                 libusb.lib.libusb_free_config_descriptor(config_ptr)
 
-            if self.interface_override is not None:
-                interface = next(
-                    (i for i in interfaces if i.number == self.interface_override), None
-                )
-                if interface is None:
-                    raise DeviceNotFoundError(
-                        "device %s has no interface %d"
-                        % (candidate_path, self.interface_override)
-                    )
-                bulk_in = next(
-                    (
-                        endpoint
-                        for endpoint in interface.endpoints
-                        if endpoint.is_bulk and endpoint.is_in
-                        and (self.endpoint_in_override is None
-                             or endpoint.address == self.endpoint_in_override)
-                    ),
-                    None,
-                )
-                bulk_out = next(
-                    (
-                        endpoint
-                        for endpoint in interface.endpoints
-                        if endpoint.is_bulk and not endpoint.is_in
-                        and (self.endpoint_out_override is None
-                             or endpoint.address == self.endpoint_out_override)
-                    ),
-                    None,
-                )
-            else:
-                selected = select_interface_and_endpoints(interfaces)
-                if selected is None:
-                    raise DeviceNotFoundError(
-                        "device %s exposes no interface with bulk endpoints"
-                        % candidate_path
-                    )
-                interface, bulk_in, bulk_out = selected
-            if bulk_in is None or bulk_out is None:
+            candidates = resolve_candidates(
+                interfaces,
+                self.interface_override,
+                self.endpoint_in_override,
+                self.endpoint_out_override,
+                where="device %s" % candidate_path,
+            )
+            self._candidates = [candidate[0].number for candidate in candidates]
+            if self._candidate_index >= len(candidates):
                 raise DeviceNotFoundError(
-                    "device %s interface %d has no usable bulk endpoints"
-                    % (candidate_path, interface.number)
+                    "device %s has no candidate interface number %d (it exposes %d)"
+                    % (candidate_path, self._candidate_index + 1, len(candidates))
                 )
+            interface, bulk_in, bulk_out = candidates[self._candidate_index]
 
             handle = ctypes.c_void_p()
             result = libusb.lib.libusb_open(device, ctypes.byref(handle))
@@ -817,6 +879,36 @@ class LibusbTransport(Transport):
             description=self._info.description,
             extra=self._info.extra,
         )
+
+    def next_candidate(self) -> bool:
+        """Move on to the next candidate interface; ``False`` when none is left.
+
+        Called by the opening path when the D4 handshake did not answer on the
+        interface this transport has claimed. The current claim is released
+        (and the kernel driver re-attached, as :meth:`close` always does), and
+        the next interface in :func:`candidate_interfaces` order is claimed
+        with the same steps :meth:`open` always takes. A candidate that cannot
+        even be claimed (busy, no permission) is noted in
+        :attr:`skipped_candidates` and the one after it is tried. When nothing
+        is left the transport stays closed and the next :meth:`open` starts
+        again from the best candidate.
+
+        With an explicit ``interface=`` there is exactly one candidate, so the
+        answer is always ``False``: choosing an interface turns the fallback off.
+        """
+        if self.interface_override is not None:
+            return False
+        self.close()
+        for index in range(self._candidate_index + 1, len(self._candidates)):
+            self._candidate_index = index
+            try:
+                self.open()
+            except TransportError as exc:
+                self.skipped_candidates.append((self._candidates[index], str(exc)))
+                continue
+            return True
+        self._candidate_index = 0
+        return False
 
     def close(self) -> None:
         libusb = None
