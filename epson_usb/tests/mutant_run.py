@@ -3,7 +3,7 @@
 """The mutant proof: the suite must go red when the library lies.
 
 A test suite that passes proves nothing about what it would catch. This script
-breaks one line of the library at a time -- in the two places where a *wrong*
+breaks one line of the library at a time -- in the four places where a *wrong*
 version of the code is a plausible mistake rather than a random one -- runs the
 suite in a separate process, and requires it to fail. Then it puts the file back
 exactly as it was.
@@ -17,6 +17,16 @@ Targets:
 2. ``epson_usb/epson_ctrl.py``: ``eeprom_write_payload()``, the two address
    bytes swapped. The frame would still look well-formed and the printer would
    answer, so only a test that checks *which* address was written catches it.
+3. ``epson_usb/backends/libusb.py``: ``candidate_interfaces()``, the ordering
+   rewritten so that the printer-class interface drops out of the candidate
+   list (M3). That is the field report's printer: D4 never answered on the
+   vendor-specific interface 0 and did on interface 1, a printer-class one. A
+   list that quietly omits such interfaces looks fine on every device where the
+   first candidate answers.
+4. ``epson_usb/printer.py``: the opening path's retry loop, stopped after the
+   first candidate (M4). Nothing else changes: the handshake on the first
+   interface, the error it raises, the single-pipe devices -- only the retry
+   goes, and only a test that makes the first interface stay silent notices.
 
 Not a target here: the waste-counter divisor. It is model knowledge, it lives in
 the client (``epson_l3250.py`` in the source project), and the source project's
@@ -57,6 +67,27 @@ TARGETS = [
         "mutant": (
             b"        + bytes([hi, lo, int(value)])"
             b"  # MUTANT (write-frame): address bytes swapped\n"
+        ),
+    },
+    {
+        "id": "candidate-order",
+        "file": "epson_usb/backends/libusb.py",
+        "what": "M3 candidate_interfaces(): the ordering drops the printer-class interface",
+        "original": b"        rank = 0 if interface.is_vendor_specific else 1\n",
+        "mutant": (
+            b"        if not interface.is_vendor_specific:\n"
+            b"            continue  # MUTANT (candidate-order): printer class dropped\n"
+            b"        rank = 0\n"
+        ),
+    },
+    {
+        "id": "retry-loop",
+        "file": "epson_usb/printer.py",
+        "what": "M4 _connect_with_fallback(): the retry loop stops after the first candidate",
+        "original": b"            if transport.next_candidate():\n",
+        "mutant": (
+            b"            if len(attempts) < 1 and transport.next_candidate():"
+            b"  # MUTANT (retry-loop): stops after the first candidate\n"
         ),
     },
 ]

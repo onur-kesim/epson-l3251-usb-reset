@@ -1,7 +1,7 @@
 name: epson-usb
 
-# Acceptance criteria K1-K4: see KRITER.md; K5-K6: see KRITER_0.1.1.md (both
-# frozen before any code).
+# Acceptance criteria K1-K4: see KRITER.md; K5-K6: see KRITER_0.1.1.md; K7-K12:
+# see KRITER_0.1.2.md (all frozen before any code).
 #
 # Runs on EVERY push on EVERY branch (no branch filter), so the throw-away
 # branches `mutant/k2-upstream-skip` and `mutant/k5-pyusb-mandatory` get a run
@@ -66,7 +66,9 @@ jobs:
           assert here.startswith(expected), "shadowed by another epson_usb: " + here
           PY
 
-      # K1: Ran >= 66, skipped = 0, exit 0.
+      # K1: Ran >= 66 plus the tests of every later release (K12: 0.1.2 adds 45,
+      # test_interface_selection.py), skipped = 0, exit 0. The floor is the
+      # measured total, so deleting a test turns the run red.
       - name: K1 - full suite, nothing skipped
         env:
           PYTHONPATH: ${{ github.workspace }}/upstream
@@ -79,7 +81,7 @@ jobs:
           m = re.search(r"^Ran (\d+) tests? in ", log, re.M)
           assert m, "no 'Ran N tests' line in the output"
           ran = int(m.group(1))
-          assert ran >= 66, "Ran %d tests, need >= 66" % ran
+          assert ran >= 111, "Ran %d tests, need >= 111" % ran
           assert not re.search(r"skipped=\d+", log), "some tests were skipped"
           print("K1: Ran %d tests, skipped 0" % ran)
           PY
@@ -100,17 +102,18 @@ jobs:
           grep -q "EPSON_USB_REQUIRE_UPSTREAM=1: refusing to skip" k2.log
           echo "K2 self-check: suite exit code $rc without the host program (red, as required)"
 
-      # K3: 2/2 mutants caught, exit 0.
-      - name: K3 - mutant proof (2/2 mutants must be caught)
+      # K3 (2/2 since 0.1.0) and K10 (4/4 since 0.1.2: M3 candidate order, M4
+      # retry loop): every mutant caught, exit 0.
+      - name: K3 / K10 - mutant proof (4/4 mutants must be caught)
         env:
           PYTHONPATH: ${{ github.workspace }}/upstream
           EPSON_USB_REQUIRE_UPSTREAM: "1"
         run: |
           python epson_usb/tests/mutant_run.py 2>&1 | tee mutant.log
-          test "$(grep -c 'red (caught)' mutant.log)" -eq 2
+          test "$(grep -c 'red (caught)' mutant.log)" -eq 4
           grep -q "OK: every mutant was caught, every file restored" mutant.log
           git diff --exit-code    # the script must leave tracked files byte-identical
-          echo "K3: 2/2 mutants caught"
+          echo "K3/K10: 4/4 mutants caught"
 
       # K4: the wheel, installed in a clean venv, imports and says MIT.
       - name: K4 - wheel in a clean venv, import works, licence is MIT
