@@ -62,7 +62,7 @@ from .epson_ctrl import (
     version_frame,
     write_confirmed,
 )
-from .errors import EepromError, ProtocolError
+from .errors import D4Error, EepromError, ProtocolError, TransportError
 from .status import full_status
 
 __all__ = ["EpsonUsbPrinter", "RestoreReport", "read_oid_values_from_transport"]
@@ -171,19 +171,20 @@ class EpsonUsbPrinter:
                 instance_id=self._instance_id,
                 **kwargs,
             )
-        self.session = EpsonCtrlSession(
+        self.session = None
+        session = _connect_with_fallback(
             transport,
-            read_key=self.read_key,
-            write_key=self.write_key,
-            timeouts=self._timeouts,
-            trace=self._trace,
+            lambda: EpsonCtrlSession(
+                transport,
+                read_key=self.read_key,
+                write_key=self.write_key,
+                timeouts=self._timeouts,
+                trace=self._trace,
+            ),
+            self.log,
         )
-        try:
-            self.revision = self.session.connect()
-        except Exception:
-            self.session.close()
-            self.session = None
-            raise
+        self.session = session
+        self.revision = session.rev
         self.log.debug("connected: %s (D4 revision 0x%02x)",
                        transport.describe(), self.revision)
         return self
@@ -672,9 +673,10 @@ def read_oid_values_from_transport(transport: Transport, oid: str,
     without a printer object. MIB OIDs (not EPSON-CTRL) answer ``(None, False)``,
     as over USB they cannot exist.
     """
-    session = EpsonCtrlSession(transport, timeouts=timeouts)
+    session = _connect_with_fallback(
+        transport, lambda: EpsonCtrlSession(transport, timeouts=timeouts), log
+    )
     try:
-        session.connect()
         try:
             name, payload = parse_snmp_oid(oid)
         except ValueError:
@@ -686,6 +688,60 @@ def read_oid_values_from_transport(transport: Transport, oid: str,
         return [("OctetString", reply)]
     finally:
         session.close()
+
+
+def _connect_with_fallback(transport: Transport,
+                           make_session: Callable[[], EpsonCtrlSession],
+                           logger: logging.Logger) -> EpsonCtrlSession:
+    """Run the D4 handshake; if it gets no answer, try the transport's next candidate.
+
+    ``make_session`` builds a session on the transport as it is *now*. When
+    the handshake fails (:class:`~epson_usb.errors.D4Error`, or the pipe
+    itself failing: :class:`~epson_usb.errors.TransportError`) the session is
+    closed and :meth:`Transport.next_candidate` is asked for another pipe --
+    for ``libusb`` that is the next interface of the device, because which one
+    answers D4 cannot be told from its descriptors. The loop ends when a
+    handshake succeeds or the transport has no candidate left.
+
+    A transport with a single pipe (``mock``, ``usbprint``, ``raw``), and a
+    ``libusb`` transport with an explicit ``interface=``, have no next
+    candidate: the one error is re-raised **unchanged**, exactly as before.
+    When several candidates were tried the error is of the same class the
+    first one raised, and its message lists every attempt.
+    """
+    attempts: List[Tuple[Optional[int], Exception]] = []
+    while True:
+        session = make_session()
+        interface = transport.info.interface
+        try:
+            session.connect()
+            return session
+        except Exception as exc:
+            session.close()
+            if not isinstance(exc, (D4Error, TransportError)):
+                raise
+            attempts.append((interface, exc))
+            if transport.next_candidate():
+                logger.info(
+                    "D4 handshake failed on interface %s (%s); trying interface %s",
+                    interface, exc, transport.info.interface,
+                )
+                continue
+            if len(attempts) == 1:
+                raise
+            raise type(attempts[0][1])(_exhausted_message(transport, attempts)) from exc
+
+
+def _exhausted_message(transport: Transport,
+                       attempts: List[Tuple[Optional[int], Exception]]) -> str:
+    """Every candidate interface that was tried, and what each one said."""
+    lines = ["no candidate interface of this device answered D4:"]
+    for interface, exc in attempts:
+        lines.append("  - interface %s: %s" % (interface, exc))
+    for interface, reason in getattr(transport, "skipped_candidates", ()):
+        lines.append("  - interface %s: could not be claimed (%s)" % (interface, reason))
+    lines.append("Choose one yourself with interface=N (command line: --interface N).")
+    return "\n".join(lines)
 
 
 def _split_address(oid, msb: int) -> Optional[int]:

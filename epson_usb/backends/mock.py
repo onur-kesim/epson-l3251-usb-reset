@@ -177,6 +177,19 @@ class MockConfig:
     reset_cells: Sequence[Tuple[int, int]] = ()
     mirror_cells: Sequence[Sequence[int]] = ()
 
+    # -- a device with several USB interfaces -----------------------------
+    #: ``epson_usb.backends.libusb.InterfaceDescriptor`` objects the fake
+    #: device exposes. Empty (the default) is a device with a single pipe, which
+    #: is what every other test relies on. With descriptors, the transport
+    #: picks its candidate interfaces through the same functions the ``libusb``
+    #: backend uses (``resolve_candidates``), so the selection under test is
+    #: the real one, not a copy of it.
+    interfaces: Sequence = ()
+    #: Interface numbers on which the fake answers D4; on any other interface
+    #: it stays silent (writes go nowhere, reads return nothing), like the
+    #: field report's interface 0. ``None`` means every interface answers.
+    d4_interfaces: Optional[Sequence[int]] = None
+
     @classmethod
     def from_model(cls, model, **overrides) -> "MockConfig":
         """Build a config from any object carrying the caller's model facts.
@@ -424,10 +437,19 @@ class MockTransport(Transport):
     name = "mock"
 
     def __init__(self, config: Optional[MockConfig] = None,
-                 printer: Optional[MockPrinter] = None) -> None:
+                 printer: Optional[MockPrinter] = None,
+                 interface: Optional[int] = None) -> None:
         super().__init__()
         self.printer = printer or MockPrinter(config)
         self.config = self.printer.config
+        #: Same meaning as ``LibusbTransport(interface=...)``: an explicit
+        #: choice, no alternatives, no fallback.
+        self.interface_override = interface
+        #: Every interface this transport claimed, in order -- what a test
+        #: asserts on to see which candidates were tried.
+        self.claimed_interfaces: List[int] = []
+        self._candidates: List[int] = []
+        self._candidate_index = 0
         self._info = DeviceInfo(
             backend=self.name,
             path="mock://%04x:%04x" % (self.config.vendor_id, self.config.product_id),
@@ -438,17 +460,67 @@ class MockTransport(Transport):
         )
 
     # -- Transport ---------------------------------------------------------
+    @property
+    def _interface(self) -> Optional[int]:
+        """The interface currently claimed (``None``: a single-pipe device)."""
+        if not self._candidates:
+            return None
+        return self._candidates[self._candidate_index]
+
     def open(self) -> None:
+        if self._opened:
+            return
+        if self.config.interfaces and not self._candidates:
+            # Imported here, not at module level: the backends are meant to be
+            # independent of each other, and only a multi-interface fake needs
+            # the libusb selection code. Resolved at open(), like libusb does,
+            # so an explicit interface the device lacks fails there.
+            from .libusb import resolve_candidates
+
+            self._candidates = [
+                candidate[0].number
+                for candidate in resolve_candidates(
+                    tuple(self.config.interfaces), self.interface_override,
+                    where="mock device",
+                )
+            ]
+            self._candidate_index = 0
         self._opened = True
+        if self._candidates:
+            self.claimed_interfaces.append(self._interface)
+            self._info = replace(self._info, interface=self._interface)
 
     def close(self) -> None:
         self._opened = False
 
+    def next_candidate(self) -> bool:
+        """The next interface of a multi-interface fake; ``False`` when none is left.
+
+        Same contract as :meth:`LibusbTransport.next_candidate`: with an explicit
+        ``interface=`` there is nothing to switch to.
+        """
+        if not self._candidates or self.interface_override is not None:
+            return False
+        self.close()
+        if self._candidate_index + 1 < len(self._candidates):
+            self._candidate_index += 1
+            self.open()
+            return True
+        self._candidate_index = 0
+        return False
+
+    def _answers_d4(self) -> bool:
+        wanted = self.config.d4_interfaces
+        return wanted is None or self._interface in tuple(wanted)
+
     def write(self, data: bytes, timeout_ms: int = 3000) -> int:
-        self.printer.feed(bytes(data))
+        if self._answers_d4():
+            self.printer.feed(bytes(data))
         return len(data)
 
     def read(self, maxlen: int = 1024, timeout_ms: int = 2000) -> bytes:
+        if not self._answers_d4():
+            return b""
         return self.printer.read(maxlen)
 
     @classmethod
